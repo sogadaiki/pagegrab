@@ -30,6 +30,7 @@ mkdirSync("dist", { recursive: true });
 
 cpSync("manifest.json", "dist/manifest.json");
 cpSync("src/popup/popup.html", "dist/popup.html");
+cpSync("icons", "dist/icons", { recursive: true });
 
 if (isWatch) {
   const contexts = await Promise.all(
