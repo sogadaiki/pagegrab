@@ -145,13 +145,18 @@ function cleanXUiLines(text: string): string {
       if (/^ALT\s*参照/.test(trimmed)) return false;
       // Remove timestamp + "関連性が高い" suffix
       if (/関連性が高い\s*$/.test(trimmed)) return false;
+      // Remove "Replying to @user" lines
+      if (/^(Replying to|返信先:?\s*)@/.test(trimmed)) return false;
+      // Remove standalone @mentions (not part of content)
+      if (/^@[\w]+$/.test(trimmed)) return false;
       return true;
     })
     .join("\n");
 }
 
 /** X UI text patterns to filter out from extracted content */
-const X_UI_PATTERNS = [
+const X_UI_PATTERNS: RegExp[] = [
+  // ── Japanese UI ──
   /^画像の説明を読む$/,
   /^関連性が高い$/,
   /^引用を表示$/,
@@ -172,6 +177,23 @@ const X_UI_PATTERNS = [
   /^クリックして.*をフォロー$/,
   /^おすすめ$/,
   /^トレンド$/,
+  /^返信$/,
+  /^コピー$/,
+  /^その他$/,
+  /^通報する$/,
+  /^ミュート$/,
+  /^ブロック$/,
+  /^興味がない$/,
+  /^この会話をミュート$/,
+  /^リストに追加\/削除$/,
+  /^プロフィールを表示$/,
+  /^ポストを埋め込む$/,
+  /^ポストのアクティビティを表示$/,
+  /^ポストのリンクをコピー$/,
+  /^認証済みアカウント$/,
+  /^表示回数$/,
+  /^\d+件の(リプライ|引用|いいね|リポスト|ブックマーク|表示)$/,
+  // ── English UI ──
   /^Verified account$/i,
   /^Show more$/i,
   /^Translate$/i,
@@ -187,6 +209,25 @@ const X_UI_PATTERNS = [
   /^Follow$/i,
   /^Following$/i,
   /^Click to Follow/i,
+  /^Reply$/i,
+  /^Copy link$/i,
+  /^More$/i,
+  /^Report$/i,
+  /^Mute$/i,
+  /^Block$/i,
+  /^Not interested$/i,
+  /^Mute this conversation$/i,
+  /^Add\/remove .* from Lists$/i,
+  /^View profile$/i,
+  /^Embed post$/i,
+  /^View post activity$/i,
+  /^View post engagements$/i,
+  /^Copy link to post$/i,
+  /^Views$/i,
+  /^\d+ views?$/i,
+  // ── Engagement counts (standalone numbers) ──
+  /^[\d,.]+[KMBkmb]?$/,
+  /^\d+万$/,
 ];
 
 function isXUiText(text: string): boolean {

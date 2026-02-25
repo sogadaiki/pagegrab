@@ -79,10 +79,10 @@ async function saveExtraction(data: {
   for (const [remoteUrl, localPath] of imageMap) {
     // Replace all occurrences of the remote URL with local path
     // Keep the remote URL as a comment for reference
-    const downloadsPath = getAbsolutePath(localPath);
+    const relativePath = toRelativeImagePath(localPath);
     content = content.replaceAll(
       `](${remoteUrl})`,
-      `](${downloadsPath})`
+      `](${relativePath})`
     );
   }
 
@@ -90,7 +90,7 @@ async function saveExtraction(data: {
   if (imageMap.size > 0) {
     content += "\n\n---\n\n## Images (local paths)\n\n";
     for (const [_remoteUrl, localPath] of imageMap) {
-      content += `- ${getAbsolutePath(localPath)}\n`;
+      content += `- ${toRelativeImagePath(localPath)}\n`;
     }
   }
 
@@ -131,7 +131,7 @@ async function saveAnalysis(data: LPAnalysis): Promise<AnalysisSaveResult> {
     ...data,
     images: data.images.map((img) => ({
       ...img,
-      localPath: getAbsolutePath(imageMap.get(img.url) ?? ""),
+      localPath: imageMap.get(img.url) ?? "",
     })),
   };
 
@@ -226,7 +226,7 @@ function buildAnalysisMarkdown(
     lines.push(`### <img> Tags (${imgTagImages.length})`);
     lines.push("");
     for (const img of imgTagImages) {
-      const localPath = getAbsolutePath(imageMap.get(img.url) ?? "");
+      const localPath = toRelativeImagePath(imageMap.get(img.url) ?? "");
       const dims = img.width && img.height ? ` (${img.width}x${img.height})` : "";
       const alt = img.alt ? ` - ${img.alt}` : "";
       lines.push(`- ![${img.alt || "image"}](${localPath})${dims}${alt}`);
@@ -238,7 +238,7 @@ function buildAnalysisMarkdown(
     lines.push(`### CSS Background Images (${bgImages.length})`);
     lines.push("");
     for (const img of bgImages) {
-      const localPath = getAbsolutePath(imageMap.get(img.url) ?? "");
+      const localPath = toRelativeImagePath(imageMap.get(img.url) ?? "");
       const dims = img.width && img.height ? ` (${img.width}x${img.height})` : "";
       lines.push(`- ![bg](${localPath})${dims}`);
     }
@@ -264,9 +264,14 @@ function guessImageExtension(url: string): string {
   return "jpg";
 }
 
-function getAbsolutePath(relativePath: string): string {
-  // chrome.downloads saves relative to ~/Downloads/
-  return `/Users/daiki12/Downloads/${relativePath}`;
+/**
+ * Convert a Downloads-relative image path to a relative path
+ * usable from markdown files in pagegrab/text/ or pagegrab/analysis/.
+ *
+ * e.g. "pagegrab/images/slug/img_001.jpg" → "../images/slug/img_001.jpg"
+ */
+function toRelativeImagePath(downloadPath: string): string {
+  return downloadPath.replace(/^pagegrab\//, "../");
 }
 
 function downloadFile(url: string, filename: string): Promise<void> {
