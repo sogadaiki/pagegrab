@@ -2,7 +2,9 @@
 
 Chrome extension that extracts page text as Markdown and downloads images locally. Built for feeding web content into AI tools like Claude Code.
 
-## Why?
+WebページのテキストをワンクリックでMarkdown抽出し、画像もローカル保存するChrome拡張機能です。
+
+## Why? / なぜ作ったか
 
 - **X (Twitter) blocks AI bots** - Claude Code can't read tweets or X articles
 - **FireShot's free plan** produces blurry screenshots that AI can't parse
@@ -10,44 +12,77 @@ Chrome extension that extracts page text as Markdown and downloads images locall
 
 PageGrab solves all three: one click to extract structured Markdown + download all images locally.
 
-## Features
+---
 
-- **Text extraction** - DOM-based, works on any page (logged-in session = no bot blocking)
-- **X (Twitter) optimized** - Handles tweets, threads, Notes (long-form posts), and articles
-- **Image download** - All images saved locally with absolute paths in Markdown
-- **Markdown output** - Frontmatter metadata + structured content, ready for AI consumption
-- **Zero external dependencies** - Runs entirely in the browser, no API keys needed
+- **X(Twitter)がAI/Botをブロックする** - Claude CodeでXのページを読み込めない
+- **FireShotの無料プラン** - スクリーンショットの文字が潰れてAI解析できない
+- **Xの長文記事(Notes)** - テキストと画像を一括でナレッジ化したい
 
-## Install
+PageGrabはこの3つをワンクリックで解決します。Markdown形式のテキスト + 画像をローカルに保存し、Claude CodeのReadツールでそのまま読み取れます。
 
-Developer mode install (not on Chrome Web Store):
+## Features / 機能
 
-1. Clone this repo
-2. `npm install && npm run build`
-3. Open `chrome://extensions` in Chrome
-4. Enable **Developer mode** (top right)
-5. Click **Load unpacked** and select the `dist/` folder
+- **テキスト抽出** - DOMベースの抽出。ログイン済みセッションで動作するためBotブロックの影響なし
+- **X(Twitter)最適化** - ツイート、スレッド、Notes(長文ポスト)、Articlesに対応
+- **画像ダウンロード** - 記事内の全画像をローカル保存。Markdownに絶対パスで参照
+- **Markdown出力** - frontmatterメタデータ + 構造化コンテンツ。AIツールにそのまま渡せる形式
+- **外部依存ゼロ** - ブラウザ内で完結。APIキー不要、外部サーバーへの通信なし
 
-## Usage
+## Size / サイズ
 
-1. Navigate to any page (X tweet, article, blog post, etc.)
-2. Click the PageGrab icon in the toolbar
-3. Click **Extract Text**
-4. Files are saved to `~/Downloads/pagegrab/`:
-   - `text/` - Markdown files
-   - `images/` - Downloaded images organized by page
+| Item | Size |
+|------|------|
+| Extension (dist/) | **80KB** |
+| Source code | ~1,000 lines (TypeScript) |
+| Runtime dependencies | **0** (dev-only: esbuild, typescript, @types/chrome) |
 
-### With Claude Code
+拡張機能本体はわずか **80KB** です。外部ライブラリの実行時依存はありません。ビルドに必要な `node_modules` (~34MB) はインストール時のみ使用され、ブラウザには読み込まれません。
+
+## Security / セキュリティ
+
+- **外部通信なし** - 抽出したデータはローカルにのみ保存されます。外部サーバーへの送信は一切ありません
+- **コード量が少ない** - TypeScript約1,000行のみ。全コードを自分で確認できます
+- **難読化なし** - ビルド済みJSもminifyしていません。`dist/` 内のコードをそのまま読めます
+- **必要最小限の権限** - `activeTab`(現在のタブのみ), `scripting`, `downloads`, `debugger`
+
+**自己責任でのインストールをお願いします。** Chrome Web Storeの審査を経ていない開発者モードインストールです。コードはすべてこのリポジトリで公開されているので、不安な方はインストール前にソースコードをご確認ください。
+
+## Install / インストール
+
+Chrome Web Storeには公開していません。開発者モードでインストールします。
 
 ```bash
-# Read the extracted text
-claude "Read /Users/you/Downloads/pagegrab/text/x.com_user_status_123_2025-01-01.md"
-
-# Read an image from the article
-claude "Read /Users/you/Downloads/pagegrab/images/x.com_user_status_123_2025-01-01/img_001.jpg"
+git clone https://github.com/sogadaiki/pagegrab.git
+cd pagegrab
+npm install
+npm run build
 ```
 
-## Output Format
+1. Chromeで `chrome://extensions` を開く
+2. 右上の **「デベロッパーモード」** をONにする
+3. **「パッケージ化されていない拡張機能を読み込む」** をクリック
+4. クローンしたリポジトリの `dist/` フォルダを選択
+
+## Usage / 使い方
+
+1. テキストを抽出したいページを開く（Xのツイート、記事、ブログなど）
+2. ツールバーのPageGrabアイコンをクリック
+3. **「Extract Text」** ボタンを押す
+4. `~/Downloads/pagegrab/` にファイルが保存される
+   - `text/` - Markdownファイル
+   - `images/` - ページごとにフォルダ分けされた画像
+
+### Claude Codeとの連携
+
+```bash
+# 抽出したテキストを読む
+claude "Read ~/Downloads/pagegrab/text/x.com_user_status_123_2025-01-01.md"
+
+# 記事内の画像を読む（Claude Codeは画像も読み取り可能）
+claude "Read ~/Downloads/pagegrab/images/x.com_user_status_123_2025-01-01/img_001.jpg"
+```
+
+## Output Format / 出力形式
 
 ```markdown
 ---
@@ -62,21 +97,21 @@ extracted_at: 2025-01-01T00:00:00Z
 
 Article content in Markdown...
 
-![image](/Users/you/Downloads/pagegrab/images/.../img_001.jpg)
+![image](~/Downloads/pagegrab/images/.../img_001.jpg)
 
 ---
 
 ## Images (local paths)
 
-- /Users/you/Downloads/pagegrab/images/.../img_001.jpg
-- /Users/you/Downloads/pagegrab/images/.../img_002.png
+- ~/Downloads/pagegrab/images/.../img_001.jpg
+- ~/Downloads/pagegrab/images/.../img_002.png
 ```
 
 ## Tech Stack
 
 - Chrome Extension Manifest V3
 - TypeScript (strict mode)
-- esbuild (zero-config bundler)
+- esbuild
 - No external runtime dependencies
 
 ## Development
