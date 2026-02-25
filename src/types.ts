@@ -1,8 +1,12 @@
 // Messages between components
-export type MessageAction = "extract" | "save" | "status";
+export type MessageAction = "extract" | "save" | "analyze" | "save-analysis" | "status";
 
 export interface ExtractMessage {
   action: "extract";
+}
+
+export interface AnalyzeMessage {
+  action: "analyze";
 }
 
 export interface SaveMessage {
@@ -10,13 +14,23 @@ export interface SaveMessage {
   data: ExtractedContent;
 }
 
+export interface SaveAnalysisMessage {
+  action: "save-analysis";
+  data: LPAnalysis;
+}
+
 export interface StatusMessage {
   action: "status";
-  status: "extracting" | "saving" | "done" | "error";
+  status: "extracting" | "saving" | "analyzing" | "done" | "error";
   message: string;
 }
 
-export type Message = ExtractMessage | SaveMessage | StatusMessage;
+export type Message =
+  | ExtractMessage
+  | AnalyzeMessage
+  | SaveMessage
+  | SaveAnalysisMessage
+  | StatusMessage;
 
 // Extracted content structure
 export interface ExtractedContent {
@@ -36,6 +50,46 @@ export interface ContentMetadata {
   type?: "tweet" | "thread" | "x-article" | "generic";
 }
 
+// LP Analysis types
+export interface FontInfo {
+  family: string;
+  weight: string;
+  size: string;
+  count: number;
+  sampleText: string;
+}
+
+export interface ColorInfo {
+  hex: string;
+  rgb: string;
+  property: string;
+  count: number;
+}
+
+export interface ImageInfo {
+  url: string;
+  type: "img" | "background";
+  alt: string;
+  width: number;
+  height: number;
+}
+
+export interface LPAnalysis {
+  url: string;
+  extractedAt: string;
+  siteName: string;
+  title: string;
+  fonts: {
+    used: FontInfo[];
+    googleFontsUrls: string[];
+    fontFaceDeclarations: string[];
+  };
+  colors: {
+    palette: ColorInfo[];
+  };
+  images: ImageInfo[];
+}
+
 // Generate slug from URL (shared between filename and image folder)
 export function generateSlug(url: string): string {
   const parsed = new URL(url);
@@ -44,9 +98,10 @@ export function generateSlug(url: string): string {
     .replace(/^\//, "")
     .replace(/\//g, "_")
     .replace(/[^a-zA-Z0-9_-]/g, "")
+    .replace(/_+$/, "")
     .slice(0, 80);
   const date = new Date().toISOString().split("T")[0];
-  return `${host}_${path}_${date}`;
+  return path ? `${host}_${path}_${date}` : `${host}_${date}`;
 }
 
 export function generateFilename(url: string): string {

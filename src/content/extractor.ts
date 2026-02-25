@@ -1,4 +1,5 @@
-import type { ExtractedContent, ExtractMessage, SaveMessage } from "../types";
+import type { ExtractedContent, Message, SaveMessage, SaveAnalysisMessage } from "../types";
+import { analyzeLPDesign } from "./lp-analyzer";
 
 // ── Site detection ──────────────────────────────────────────
 
@@ -651,29 +652,44 @@ function collectImageUrls(markdown: string): string[] {
 // ── Entry point: message listener ───────────────────────────
 
 chrome.runtime.onMessage.addListener(
-  (message: ExtractMessage, _sender, sendResponse) => {
-    if (message.action !== "extract") return;
+  (message: Message, _sender, sendResponse) => {
+    if (message.action === "extract") {
+      try {
+        let result: ExtractedContent;
 
-    try {
-      let result: ExtractedContent;
+        if (isXArticlePage()) {
+          result = extractXArticle();
+        } else if (isXDomain()) {
+          result = extractXContent();
+        } else {
+          result = extractGeneric();
+        }
 
-      if (isXArticlePage()) {
-        result = extractXArticle();
-      } else if (isXDomain()) {
-        result = extractXContent();
-      } else {
-        result = extractGeneric();
+        const saveMessage: SaveMessage = { action: "save", data: result };
+        chrome.runtime.sendMessage(saveMessage);
+
+        sendResponse({ success: true, title: result.title });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        sendResponse({ success: false, error: errorMsg });
       }
-
-      const saveMessage: SaveMessage = { action: "save", data: result };
-      chrome.runtime.sendMessage(saveMessage);
-
-      sendResponse({ success: true, title: result.title });
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      sendResponse({ success: false, error: errorMsg });
+      return true;
     }
 
-    return true;
+    if (message.action === "analyze") {
+      try {
+        const analysis = analyzeLPDesign();
+        const saveMsg: SaveAnalysisMessage = { action: "save-analysis", data: analysis };
+        chrome.runtime.sendMessage(saveMsg);
+        sendResponse({
+          success: true,
+          title: `LP Analysis: ${analysis.images.length} images, ${analysis.fonts.used.length} fonts, ${analysis.colors.palette.length} colors`,
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        sendResponse({ success: false, error: errorMsg });
+      }
+      return true;
+    }
   }
 );

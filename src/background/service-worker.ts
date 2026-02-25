@@ -1,5 +1,5 @@
-import type { Message } from "../types";
-import { generateFilename, generateImageDir } from "../types";
+import type { Message, LPAnalysis } from "../types";
+import { generateFilename, generateImageDir, generateSlug } from "../types";
 
 chrome.runtime.onMessage.addListener(
   (message: Message, _sender, sendResponse) => {
@@ -12,6 +12,28 @@ chrome.runtime.onMessage.addListener(
             message: `Saved: ${result.mdFile} + ${result.imageCount} images`,
           } satisfies Message);
           sendResponse({ success: true, filename: result.mdFile });
+        })
+        .catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "error",
+            message: errorMsg,
+          } satisfies Message);
+          sendResponse({ success: false, error: errorMsg });
+        });
+      return true;
+    }
+
+    if (message.action === "save-analysis") {
+      saveAnalysis(message.data)
+        .then((result) => {
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "done",
+            message: `LP Analysis saved: ${result.jsonFile} (${result.imageCount} images, ${result.fontCount} fonts, ${result.colorCount} colors)`,
+          } satisfies Message);
+          sendResponse({ success: true, filename: result.jsonFile });
         })
         .catch((err) => {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -74,18 +96,171 @@ async function saveExtraction(data: {
 
   // Save markdown
   const mdFile = generateFilename(data.url);
-  await downloadMarkdown(content, mdFile);
+  await downloadTextFile(content, mdFile);
 
   return { mdFile, imageCount: imageMap.size };
 }
 
+// ── LP Analysis save ─────────────────────────────────────────
+
+interface AnalysisSaveResult {
+  jsonFile: string;
+  imageCount: number;
+  fontCount: number;
+  colorCount: number;
+}
+
+async function saveAnalysis(data: LPAnalysis): Promise<AnalysisSaveResult> {
+  const slug = generateSlug(data.url);
+  const imageDir = `pagegrab/images/${slug}`;
+
+  // Download all images (both <img> and background-image)
+  const imageMap = new Map<string, string>();
+  const downloadPromises = data.images.map((img, index) => {
+    const prefix = img.type === "background" ? "bg" : "img";
+    const ext = guessImageExtension(img.url);
+    const localFilename = `${imageDir}/${prefix}_${String(index + 1).padStart(3, "0")}.${ext}`;
+    imageMap.set(img.url, localFilename);
+    return downloadFile(img.url, localFilename);
+  });
+
+  await Promise.allSettled(downloadPromises);
+
+  // Build analysis JSON with local paths
+  const analysisWithLocalPaths = {
+    ...data,
+    images: data.images.map((img) => ({
+      ...img,
+      localPath: getAbsolutePath(imageMap.get(img.url) ?? ""),
+    })),
+  };
+
+  // Save JSON
+  const jsonFile = `pagegrab/analysis/${slug}.json`;
+  const jsonContent = JSON.stringify(analysisWithLocalPaths, null, 2);
+  await downloadTextFile(jsonContent, jsonFile, "application/json");
+
+  // Save Markdown summary
+  const mdFile = `pagegrab/analysis/${slug}.md`;
+  const mdContent = buildAnalysisMarkdown(data, imageMap);
+  await downloadTextFile(mdContent, mdFile, "text/markdown;charset=utf-8");
+
+  return {
+    jsonFile,
+    imageCount: data.images.length,
+    fontCount: data.fonts.used.length,
+    colorCount: data.colors.palette.length,
+  };
+}
+
+function buildAnalysisMarkdown(
+  data: LPAnalysis,
+  imageMap: Map<string, string>
+): string {
+  const lines: string[] = [];
+
+  lines.push("---");
+  lines.push(`source: ${data.siteName}`);
+  lines.push(`url: ${data.url}`);
+  lines.push(`extracted_at: ${data.extractedAt}`);
+  lines.push(`type: lp-analysis`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# LP Analysis: ${data.title}`);
+  lines.push("");
+
+  // Fonts section
+  lines.push("## Fonts");
+  lines.push("");
+  if (data.fonts.googleFontsUrls.length > 0) {
+    lines.push("### Google Fonts");
+    for (const url of data.fonts.googleFontsUrls) {
+      lines.push(`- ${url}`);
+    }
+    lines.push("");
+  }
+  if (data.fonts.fontFaceDeclarations.length > 0) {
+    lines.push("### @font-face Declarations");
+    lines.push("```css");
+    for (const decl of data.fonts.fontFaceDeclarations) {
+      lines.push(decl);
+    }
+    lines.push("```");
+    lines.push("");
+  }
+  lines.push("### Used Fonts (by frequency)");
+  lines.push("");
+  lines.push("| Font Family | Weight | Size | Count | Sample |");
+  lines.push("|-------------|--------|------|-------|--------|");
+  // Show top 20 fonts
+  for (const font of data.fonts.used.slice(0, 20)) {
+    const escapedFamily = font.family.replace(/\|/g, "\\|");
+    const escapedSample = font.sampleText.replace(/\|/g, "\\|").replace(/\n/g, " ");
+    lines.push(
+      `| ${escapedFamily} | ${font.weight} | ${font.size} | ${font.count} | ${escapedSample} |`
+    );
+  }
+  lines.push("");
+
+  // Colors section
+  lines.push("## Color Palette");
+  lines.push("");
+  lines.push("| Color | Hex | RGB | Usage | Count |");
+  lines.push("|-------|-----|-----|-------|-------|");
+  // Show top 30 colors
+  for (const color of data.colors.palette.slice(0, 30)) {
+    lines.push(
+      `| ${color.hex} | \`${color.hex}\` | \`${color.rgb}\` | ${color.property} | ${color.count} |`
+    );
+  }
+  lines.push("");
+
+  // Images section
+  const imgTagImages = data.images.filter((i) => i.type === "img");
+  const bgImages = data.images.filter((i) => i.type === "background");
+
+  lines.push(`## Images (${data.images.length} total)`);
+  lines.push("");
+
+  if (imgTagImages.length > 0) {
+    lines.push(`### <img> Tags (${imgTagImages.length})`);
+    lines.push("");
+    for (const img of imgTagImages) {
+      const localPath = getAbsolutePath(imageMap.get(img.url) ?? "");
+      const dims = img.width && img.height ? ` (${img.width}x${img.height})` : "";
+      const alt = img.alt ? ` - ${img.alt}` : "";
+      lines.push(`- ![${img.alt || "image"}](${localPath})${dims}${alt}`);
+    }
+    lines.push("");
+  }
+
+  if (bgImages.length > 0) {
+    lines.push(`### CSS Background Images (${bgImages.length})`);
+    lines.push("");
+    for (const img of bgImages) {
+      const localPath = getAbsolutePath(imageMap.get(img.url) ?? "");
+      const dims = img.width && img.height ? ` (${img.width}x${img.height})` : "";
+      lines.push(`- ![bg](${localPath})${dims}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+// ── Shared utilities ─────────────────────────────────────────
+
 function guessImageExtension(url: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const match = pathname.match(/\.(png|gif|webp|svg|avif|jpe?g)$/i);
+    if (match) return match[1].toLowerCase().replace("jpeg", "jpg");
+  } catch {
+    // invalid URL, fall through
+  }
   if (url.includes("format=png")) return "png";
-  if (url.includes("format=gif")) return "gif";
   if (url.includes("format=webp")) return "webp";
-  if (url.includes(".png")) return "png";
-  if (url.includes(".gif")) return "gif";
-  if (url.includes(".webp")) return "webp";
+  if (url.includes("format=gif")) return "gif";
   return "jpg";
 }
 
@@ -101,7 +276,7 @@ function downloadFile(url: string, filename: string): Promise<void> {
         url,
         filename,
         saveAs: false,
-        conflictAction: "uniquify",
+        conflictAction: "overwrite",
       },
       (downloadId) => {
         if (chrome.runtime.lastError) {
@@ -118,11 +293,12 @@ function downloadFile(url: string, filename: string): Promise<void> {
   });
 }
 
-async function downloadMarkdown(
+async function downloadTextFile(
   content: string,
-  filename: string
+  filename: string,
+  mimeType: string = "text/markdown;charset=utf-8"
 ): Promise<string> {
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const blob = new Blob([content], { type: mimeType });
   const dataUrl = await blobToDataUrl(blob);
 
   return new Promise((resolve, reject) => {
@@ -131,7 +307,7 @@ async function downloadMarkdown(
         url: dataUrl,
         filename,
         saveAs: false,
-        conflictAction: "uniquify",
+        conflictAction: "overwrite",
       },
       (downloadId) => {
         if (chrome.runtime.lastError) {
