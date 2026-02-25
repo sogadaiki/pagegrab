@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "PageGrab",
+  "version": "0.1.0",
+  "description": "Extract page text as Markdown and capture full-page screenshots",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "debugger"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "PageGrab"
+  }
+}
