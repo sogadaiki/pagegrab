@@ -38,14 +38,44 @@ function extractXContent(): ExtractedContent {
   );
   let bodyText = tweetTextEl ? domToMarkdown(tweetTextEl) : "";
 
-  // Strategy 2: If tweetText is empty/short, this is likely a Note/long-form post.
-  // Extract all visible text from the primary tweet's content area,
-  // excluding navigation chrome (user-name, action buttons, etc.)
-  if (bodyText.trim().length < 50 && primaryTweet) {
-    bodyText = extractXNoteContent(primaryTweet);
+  // Strategy 2: Always check for Note/long-form content.
+  // X Notes render their full article body OUTSIDE tweetText but within
+  // the same article element. The tweetText only contains a short preview,
+  // so we must always attempt Note extraction and use the longer result.
+  if (primaryTweet) {
+    const noteContent = extractXNoteContent(primaryTweet);
+    if (noteContent.trim().length > bodyText.trim().length) {
+      bodyText = noteContent;
+    }
   }
 
-  // Strategy 3: If still insufficient, grab the entire main content area
+  // Strategy 3: If content is still short, try the broader page area.
+  // Some X Note layouts render the article body outside the first
+  // article[data-testid="tweet"] element (e.g. in the primaryColumn).
+  if (bodyText.trim().length < 500) {
+    const primaryColumn = document.querySelector(
+      '[data-testid="primaryColumn"]'
+    );
+    if (primaryColumn) {
+      const broadContent = extractXNoteContent(primaryColumn);
+      if (broadContent.trim().length > bodyText.trim().length * 1.5) {
+        bodyText = broadContent;
+      }
+    }
+  }
+
+  // Strategy 4: Check if the Note opened in a modal/dialog (reader view)
+  const modal = document.querySelector(
+    '[role="dialog"], [aria-modal="true"]'
+  );
+  if (modal) {
+    const modalContent = cleanXUiLines(domToMarkdown(modal));
+    if (modalContent.trim().length > bodyText.trim().length) {
+      bodyText = modalContent;
+    }
+  }
+
+  // Strategy 5: Final fallback – raw innerText of the main content area
   if (bodyText.trim().length < 50) {
     bodyText = extractXPageFallback();
   }
@@ -266,12 +296,18 @@ function extractXNoteContent(articleEl: Element): string {
     clone.querySelectorAll(sel).forEach((el) => el.remove());
   }
 
-  // Extract text from all div[dir="auto"] and span[dir="auto"] elements
-  // which is how X renders rich text content
+  // Remove aria-hidden attributes so that collapsed/hidden Note body
+  // content (e.g. behind "Show more") can still be extracted from the DOM
+  clone.querySelectorAll('[aria-hidden="true"]').forEach((el) => {
+    el.removeAttribute("aria-hidden");
+  });
+
+  // ── Approach A: Extract from dir="auto" elements (X's standard rich text)
   const textNodes = clone.querySelectorAll(
     'div[dir="auto"], span[dir="auto"]'
   );
 
+  let dirAutoResult = "";
   if (textNodes.length > 0) {
     const parts: string[] = [];
     const seen = new Set<string>();
@@ -289,12 +325,58 @@ function extractXNoteContent(articleEl: Element): string {
       }
     });
 
-    const result = parts.join("\n\n");
-    if (result.length > 50) return result;
+    dirAutoResult = parts.join("\n\n");
   }
 
-  // Fallback: use the full article clone
-  return domToMarkdown(clone);
+  // ── Approach B: Full domToMarkdown on cleaned clone.
+  // Captures content in ANY element type (p, div, section, etc.)
+  // that Approach A may miss if the Note body doesn't use dir="auto".
+  const fullResult = domToMarkdown(clone);
+
+  // Use whichever approach yielded more content
+  if (fullResult.trim().length > dirAutoResult.length * 1.2) {
+    return fullResult;
+  }
+  return dirAutoResult || fullResult;
+}
+
+/**
+ * Before extraction, try to expand collapsed long-form content
+ * by clicking "Show more" / "もっと見る" buttons.
+ */
+async function maybeExpandXContent(): Promise<void> {
+  const primaryTweet = document.querySelector('article[data-testid="tweet"]');
+  if (!primaryTweet) return;
+
+  // 1. Try X's native show-more link (most reliable selector)
+  const showMore = primaryTweet.querySelector(
+    '[data-testid="tweet-text-show-more-link"]'
+  );
+  if (showMore) {
+    (showMore as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 1500));
+    return;
+  }
+
+  // 2. Try text-based matching for show-more controls
+  const candidates = primaryTweet.querySelectorAll(
+    'a, [role="link"], span, div'
+  );
+  for (const el of candidates) {
+    const text = (el.textContent ?? "").trim();
+    if (
+      /^(Show more|もっと見る|さらに表示|続きを読む|Read more)$/i.test(text)
+    ) {
+      // Skip navigation links (would leave the page)
+      if (el.tagName === "A") {
+        const href = (el as HTMLAnchorElement).href;
+        if (href && !href.includes(location.pathname)) continue;
+      }
+      (el as HTMLElement).click();
+      await new Promise((r) => setTimeout(r, 1500));
+      return;
+    }
+  }
 }
 
 /**
@@ -695,25 +777,32 @@ function collectImageUrls(markdown: string): string[] {
 chrome.runtime.onMessage.addListener(
   (message: Message, _sender, sendResponse) => {
     if (message.action === "extract") {
-      try {
-        let result: ExtractedContent;
+      (async () => {
+        try {
+          // On X status pages, try expanding collapsed content first
+          if (isXStatusPage()) {
+            await maybeExpandXContent();
+          }
 
-        if (isXArticlePage()) {
-          result = extractXArticle();
-        } else if (isXDomain()) {
-          result = extractXContent();
-        } else {
-          result = extractGeneric();
+          let result: ExtractedContent;
+
+          if (isXArticlePage()) {
+            result = extractXArticle();
+          } else if (isXDomain()) {
+            result = extractXContent();
+          } else {
+            result = extractGeneric();
+          }
+
+          const saveMessage: SaveMessage = { action: "save", data: result };
+          chrome.runtime.sendMessage(saveMessage);
+
+          sendResponse({ success: true, title: result.title });
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          sendResponse({ success: false, error: errorMsg });
         }
-
-        const saveMessage: SaveMessage = { action: "save", data: result };
-        chrome.runtime.sendMessage(saveMessage);
-
-        sendResponse({ success: true, title: result.title });
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        sendResponse({ success: false, error: errorMsg });
-      }
+      })();
       return true;
     }
 
