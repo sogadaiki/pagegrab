@@ -100,8 +100,10 @@ export function generateSlug(url: string): string {
     .replace(/[^a-zA-Z0-9_-]/g, "")
     .replace(/_+$/, "")
     .slice(0, 80);
-  const date = new Date().toISOString().split("T")[0];
-  return path ? `${host}_${path}_${date}` : `${host}_${date}`;
+  const now = new Date();
+  const date = now.toISOString().split("T")[0];
+  const time = now.toTimeString().slice(0, 8).replace(/:/g, "");
+  return path ? `${host}_${path}_${date}_${time}` : `${host}_${date}_${time}`;
 }
 
 export function generateFilename(url: string): string {
