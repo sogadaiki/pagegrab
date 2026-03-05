@@ -650,17 +650,55 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
     const maxHeight = 16384;
     const captureHeight = Math.min(height, maxHeight);
 
-    // Capture with clip rect -- do NOT change device metrics (causes fixed elements to repeat)
+    // Neutralize fixed/sticky elements so they don't repeat at every viewport tile
+    await debuggerSend(target, "Runtime.evaluate", {
+      expression: `(() => {
+        const fixed = [];
+        document.querySelectorAll('*').forEach(el => {
+          const pos = getComputedStyle(el).position;
+          if (pos === 'fixed' || pos === 'sticky') {
+            fixed.push({ el, orig: el.style.position });
+            el.style.setProperty('position', 'absolute', 'important');
+          }
+        });
+        document.body.style.setProperty('overflow', 'visible', 'important');
+        window.__pagegrab_fixed = fixed;
+      })()`,
+    });
+
+    // Small delay for re-layout
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Re-measure after layout change (fixed elements may affect content size)
+    const metrics2 = await debuggerSend(target, "Page.getLayoutMetrics");
+    const contentSize2 = metrics2.cssContentSize as { width: number; height: number };
+    const finalWidth = Math.ceil(contentSize2.width);
+    const finalHeight = Math.min(Math.ceil(contentSize2.height), maxHeight);
+
+    // Capture with clip rect
     const screenshot = await debuggerSend(target, "Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: true,
       clip: {
         x: 0,
         y: 0,
-        width,
-        height: captureHeight,
+        width: finalWidth,
+        height: finalHeight,
         scale: 1,
       },
+    });
+
+    // Restore original positioning
+    await debuggerSend(target, "Runtime.evaluate", {
+      expression: `(() => {
+        if (window.__pagegrab_fixed) {
+          window.__pagegrab_fixed.forEach(({ el, orig }) => {
+            el.style.position = orig;
+          });
+          delete window.__pagegrab_fixed;
+        }
+        document.body.style.removeProperty('overflow');
+      })()`,
     });
 
     // Save the PNG
