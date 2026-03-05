@@ -1,5 +1,5 @@
 // Messages between components
-export type MessageAction = "extract" | "save" | "analyze" | "save-analysis" | "status";
+export type MessageAction = "extract" | "save" | "analyze" | "save-analysis" | "design-system" | "save-design-system" | "status";
 
 export interface ExtractMessage {
   action: "extract";
@@ -19,6 +19,15 @@ export interface SaveAnalysisMessage {
   data: LPAnalysis;
 }
 
+export interface DesignSystemMessage {
+  action: "design-system";
+}
+
+export interface SaveDesignSystemMessage {
+  action: "save-design-system";
+  data: DesignSystemAnalysis;
+}
+
 export interface StatusMessage {
   action: "status";
   status: "extracting" | "saving" | "analyzing" | "done" | "error";
@@ -30,6 +39,8 @@ export type Message =
   | AnalyzeMessage
   | SaveMessage
   | SaveAnalysisMessage
+  | DesignSystemMessage
+  | SaveDesignSystemMessage
   | StatusMessage;
 
 // Extracted content structure
@@ -88,6 +99,56 @@ export interface LPAnalysis {
     palette: ColorInfo[];
   };
   images: ImageInfo[];
+}
+
+// ── Design System types ──────────────────────────────────────
+
+export interface SpacingToken {
+  value: string;
+  px: number;
+  count: number;
+  properties: string[];
+}
+
+export interface TypographyToken {
+  fontSize: string;
+  lineHeight: string;
+  letterSpacing: string;
+  fontFamily: string;
+  fontWeight: string;
+  count: number;
+  sampleText: string;
+  element: string;
+}
+
+export interface ColorToken {
+  hex: string;
+  rgb: string;
+  count: number;
+  role: "primary" | "secondary" | "accent" | "neutral" | "background" | "border" | "text";
+  properties: string[];
+}
+
+export interface DesignSystemAnalysis {
+  url: string;
+  extractedAt: string;
+  siteName: string;
+  title: string;
+  spacing: {
+    scale: SpacingToken[];
+    baseUnit: number;
+  };
+  typography: {
+    scale: TypographyToken[];
+    families: string[];
+    googleFontsUrls: string[];
+  };
+  colors: {
+    tokens: ColorToken[];
+    backgrounds: ColorToken[];
+    borders: ColorToken[];
+    texts: ColorToken[];
+  };
 }
 
 // Generate slug from URL (shared between filename and image folder)

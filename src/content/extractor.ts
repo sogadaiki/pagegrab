@@ -1,5 +1,6 @@
-import type { ExtractedContent, Message, SaveMessage, SaveAnalysisMessage } from "../types";
+import type { ExtractedContent, Message, SaveMessage, SaveAnalysisMessage, SaveDesignSystemMessage } from "../types";
 import { analyzeLPDesign } from "./lp-analyzer";
+import { analyzeDesignSystem } from "./design-system-analyzer";
 
 // ── Site detection ──────────────────────────────────────────
 
@@ -814,6 +815,22 @@ chrome.runtime.onMessage.addListener(
         sendResponse({
           success: true,
           title: `LP Analysis: ${analysis.images.length} images, ${analysis.fonts.used.length} fonts, ${analysis.colors.palette.length} colors`,
+        });
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        sendResponse({ success: false, error: errorMsg });
+      }
+      return true;
+    }
+
+    if (message.action === "design-system") {
+      try {
+        const ds = analyzeDesignSystem();
+        const saveMsg: SaveDesignSystemMessage = { action: "save-design-system", data: ds };
+        chrome.runtime.sendMessage(saveMsg);
+        sendResponse({
+          success: true,
+          title: `Design System: ${ds.spacing.scale.length} spacing, ${ds.typography.scale.length} typo, ${ds.colors.tokens.length} colors`,
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);

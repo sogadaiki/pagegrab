@@ -1,4 +1,4 @@
-import type { Message, LPAnalysis } from "../types";
+import type { Message, LPAnalysis, DesignSystemAnalysis } from "../types";
 import { generateFilename, generateImageDir, generateSlug } from "../types";
 
 chrome.runtime.onMessage.addListener(
@@ -12,6 +12,28 @@ chrome.runtime.onMessage.addListener(
             message: `Saved: ${result.mdFile} + ${result.imageCount} images`,
           } satisfies Message);
           sendResponse({ success: true, filename: result.mdFile });
+        })
+        .catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "error",
+            message: errorMsg,
+          } satisfies Message);
+          sendResponse({ success: false, error: errorMsg });
+        });
+      return true;
+    }
+
+    if (message.action === "save-design-system") {
+      saveDesignSystem(message.data)
+        .then((result) => {
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "done",
+            message: `Design System saved: ${result.dir} (${result.fileCount} files)`,
+          } satisfies Message);
+          sendResponse({ success: true, filename: result.dir });
         })
         .catch((err) => {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -246,6 +268,198 @@ function buildAnalysisMarkdown(
   }
 
   return lines.join("\n");
+}
+
+// ── Design System save ───────────────────────────────────────
+
+interface DesignSystemSaveResult {
+  dir: string;
+  fileCount: number;
+}
+
+async function saveDesignSystem(data: DesignSystemAnalysis): Promise<DesignSystemSaveResult> {
+  const slug = generateSlug(data.url);
+  const dir = `pagegrab/design-system/${slug}`;
+
+  const tokensCss = generateTokensCss(data);
+  const tailwindConfig = generateTailwindConfig(data);
+  const tokensJson = JSON.stringify(data, null, 2);
+
+  await Promise.allSettled([
+    downloadTextFile(tokensCss, `${dir}/tokens.css`, "text/css;charset=utf-8"),
+    downloadTextFile(tailwindConfig, `${dir}/tailwind.config.js`, "text/javascript;charset=utf-8"),
+    downloadTextFile(tokensJson, `${dir}/tokens.json`, "application/json"),
+  ]);
+
+  return { dir, fileCount: 3 };
+}
+
+function generateTokensCss(data: DesignSystemAnalysis): string {
+  const lines: string[] = [];
+  lines.push("/* Design System Tokens */");
+  lines.push(`/* Source: ${data.url} */`);
+  lines.push(`/* Extracted: ${data.extractedAt} */`);
+  lines.push("");
+  lines.push(":root {");
+
+  // Spacing
+  lines.push("  /* Spacing */");
+  const base = data.spacing.baseUnit;
+  lines.push(`  --spacing-base: ${base}px;`);
+  const spacingSteps = data.spacing.scale
+    .filter((s) => s.count >= 3 && s.px % base === 0)
+    .slice(0, 20);
+  for (const token of spacingSteps) {
+    const multiplier = token.px / base;
+    lines.push(`  --spacing-${multiplier}: ${token.px}px; /* ${token.count}x used */`);
+  }
+  // Also include non-base-aligned spacing values with high usage
+  const oddSpacing = data.spacing.scale
+    .filter((s) => s.count >= 5 && s.px % base !== 0)
+    .slice(0, 10);
+  for (const token of oddSpacing) {
+    lines.push(`  --spacing-${token.px}: ${token.px}px; /* ${token.count}x used */`);
+  }
+  lines.push("");
+
+  // Typography
+  lines.push("  /* Typography */");
+  const seenSizes = new Set<string>();
+  const sortedTypo = [...data.typography.scale].sort(
+    (a, b) => parseFloat(b.fontSize) - parseFloat(a.fontSize)
+  );
+  const sizeNames = ["5xl", "4xl", "3xl", "2xl", "xl", "lg", "base", "sm", "xs"];
+  let sizeIdx = 0;
+  for (const token of sortedTypo) {
+    if (seenSizes.has(token.fontSize) || sizeIdx >= sizeNames.length) continue;
+    if (token.count < 2) continue;
+    seenSizes.add(token.fontSize);
+    const name = sizeNames[sizeIdx++];
+    lines.push(`  --font-size-${name}: ${token.fontSize};`);
+    if (token.lineHeight !== "normal") {
+      lines.push(`  --line-height-${name}: ${token.lineHeight};`);
+    }
+  }
+  lines.push("");
+
+  // Font families
+  const families = data.typography.families.slice(0, 5);
+  if (families.length > 0) {
+    lines.push(`  --font-primary: "${families[0]}", sans-serif;`);
+    if (families.length > 1) {
+      lines.push(`  --font-secondary: "${families[1]}", sans-serif;`);
+    }
+  }
+  lines.push("");
+
+  // Colors
+  lines.push("  /* Colors */");
+  const primaryColors = data.colors.tokens.filter((c) => c.role === "primary").slice(0, 3);
+  const accentColors = data.colors.tokens.filter((c) => c.role === "accent").slice(0, 3);
+  const neutralColors = data.colors.tokens.filter((c) => c.role === "neutral" || c.role === "text").slice(0, 5);
+  const bgColors = data.colors.tokens.filter((c) => c.role === "background").slice(0, 3);
+  const borderColors = data.colors.tokens.filter((c) => c.role === "border").slice(0, 3);
+
+  writeColorVars(lines, "primary", primaryColors);
+  writeColorVars(lines, "accent", accentColors);
+  writeColorVars(lines, "neutral", neutralColors);
+  writeColorVars(lines, "bg", bgColors);
+  writeColorVars(lines, "border", borderColors);
+
+  lines.push("}");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function writeColorVars(lines: string[], prefix: string, colors: { hex: string; count: number }[]): void {
+  colors.forEach((c, i) => {
+    const suffix = colors.length > 1 ? `-${i + 1}` : "";
+    lines.push(`  --color-${prefix}${suffix}: ${c.hex}; /* ${c.count}x used */`);
+  });
+}
+
+function generateTailwindConfig(data: DesignSystemAnalysis): string {
+  const base = data.spacing.baseUnit;
+
+  // Spacing object
+  const spacingEntries: string[] = [];
+  const spacingSteps = data.spacing.scale
+    .filter((s) => s.count >= 3)
+    .slice(0, 25);
+  for (const token of spacingSteps) {
+    const key = token.px % base === 0 ? String(token.px / base) : `"${token.px}"`;
+    spacingEntries.push(`      ${key}: "${token.px}px",`);
+  }
+
+  // Font size object
+  const fontSizeEntries: string[] = [];
+  const seenSizes = new Set<string>();
+  const sizeNames = ["5xl", "4xl", "3xl", "2xl", "xl", "lg", "base", "sm", "xs"];
+  let sizeIdx = 0;
+  const sortedTypo = [...data.typography.scale].sort(
+    (a, b) => parseFloat(b.fontSize) - parseFloat(a.fontSize)
+  );
+  for (const token of sortedTypo) {
+    if (seenSizes.has(token.fontSize) || sizeIdx >= sizeNames.length) continue;
+    if (token.count < 2) continue;
+    seenSizes.add(token.fontSize);
+    const name = sizeNames[sizeIdx++];
+    const lh = token.lineHeight !== "normal" ? token.lineHeight : "1.5";
+    fontSizeEntries.push(`      "${name}": ["${token.fontSize}", "${lh}"],`);
+  }
+
+  // Font family
+  const familyEntries: string[] = [];
+  const families = data.typography.families.slice(0, 3);
+  if (families.length > 0) {
+    familyEntries.push(`      primary: ["${families[0]}", "sans-serif"],`);
+    if (families.length > 1) {
+      familyEntries.push(`      secondary: ["${families[1]}", "sans-serif"],`);
+    }
+  }
+
+  // Colors
+  const colorEntries: string[] = [];
+  const grouped = new Map<string, { hex: string; count: number }[]>();
+  for (const token of data.colors.tokens.slice(0, 30)) {
+    const arr = grouped.get(token.role) ?? [];
+    arr.push(token);
+    grouped.set(token.role, arr);
+  }
+  for (const [role, colors] of grouped) {
+    if (colors.length === 1) {
+      colorEntries.push(`      "${role}": "${colors[0].hex}",`);
+    } else {
+      colorEntries.push(`      "${role}": {`);
+      colors.forEach((c, i) => {
+        colorEntries.push(`        ${(i + 1) * 100}: "${c.hex}",`);
+      });
+      colorEntries.push("      },");
+    }
+  }
+
+  return `/** @type {import('tailwindcss').Config} */
+// Design System extracted from: ${data.url}
+// Extracted: ${data.extractedAt}
+export default {
+  theme: {
+    extend: {
+      spacing: {
+${spacingEntries.join("\n")}
+      },
+      fontSize: {
+${fontSizeEntries.join("\n")}
+      },
+      fontFamily: {
+${familyEntries.join("\n")}
+      },
+      colors: {
+${colorEntries.join("\n")}
+      },
+    },
+  },
+};
+`;
 }
 
 // ── Shared utilities ─────────────────────────────────────────
