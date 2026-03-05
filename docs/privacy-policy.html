@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - PageGrab</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #1a1a1a;
+      background: #ffffff;
+      padding: 48px 24px;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 48px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+
+    .product-name {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #0d0d0d;
+      margin-bottom: 16px;
+    }
+
+    .meta {
+      font-size: 14px;
+      color: #888;
+    }
+
+    .highlight-box {
+      background: #f0f7ff;
+      border: 1px solid #c3defe;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 48px;
+    }
+
+    .highlight-box p {
+      font-size: 15px;
+      font-weight: 500;
+      color: #1a3a5c;
+      line-height: 1.6;
+    }
+
+    .highlight-box strong {
+      font-weight: 700;
+    }
+
+    section {
+      margin-bottom: 40px;
+    }
+
+    h2 {
+      font-size: 19px;
+      font-weight: 700;
+      color: #0d0d0d;
+      margin-bottom: 12px;
+      letter-spacing: -0.01em;
+    }
+
+    p {
+      color: #333;
+      margin-bottom: 12px;
+    }
+
+    p:last-child {
+      margin-bottom: 0;
+    }
+
+    ul {
+      margin: 12px 0;
+      padding-left: 24px;
+    }
+
+    li {
+      color: #333;
+      margin-bottom: 6px;
+    }
+
+    li:last-child {
+      margin-bottom: 0;
+    }
+
+    .permission-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+
+    .permission-table th {
+      text-align: left;
+      font-weight: 600;
+      color: #0d0d0d;
+      padding: 10px 14px;
+      background: #f5f5f5;
+      border: 1px solid #e5e5e5;
+    }
+
+    .permission-table td {
+      padding: 10px 14px;
+      border: 1px solid #e5e5e5;
+      vertical-align: top;
+      color: #333;
+    }
+
+    .permission-table tr:nth-child(even) td {
+      background: #fafafa;
+    }
+
+    code {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      background: #f0f0f0;
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: #333;
+    }
+
+    a {
+      color: #0057c2;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    footer {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid #e5e5e5;
+      font-size: 13px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header>
+      <p class="product-name">PageGrab &mdash; Chrome Extension</p>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Effective date: March 2026 &nbsp;&middot;&nbsp; Developer: Daiki Soga</p>
+    </header>
+
+    <div class="highlight-box">
+      <p>
+        <strong>The short version:</strong> PageGrab processes everything locally inside your browser.
+        No data &mdash; not your page content, not your screenshots, not any personal information &mdash;
+        ever leaves your device. There are no servers, no analytics, and no accounts.
+      </p>
+    </div>
+
+    <section>
+      <h2>1. Information Collection</h2>
+      <p>
+        PageGrab does not collect, record, or store any personal information. The extension operates
+        entirely within your local browser environment.
+      </p>
+      <p>When you use PageGrab, it may access the following types of data on your active tab &mdash;
+        solely to perform the function you requested:</p>
+      <ul>
+        <li>Page text and HTML structure (for content extraction and layout analysis)</li>
+        <li>CSS styles and computed layout values (for design system reverse-engineering)</li>
+        <li>Visual rendering of the page (for full-page screenshots)</li>
+      </ul>
+      <p>
+        This data is processed in memory and, if you choose to export it, saved directly to your
+        local filesystem via the browser's native download mechanism. Nothing is transmitted to any
+        external server. PageGrab has no backend.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Data Usage</h2>
+      <p>Data accessed by PageGrab is used exclusively to:</p>
+      <ul>
+        <li>Extract and format text content from the current page</li>
+        <li>Analyze page layout and component structure</li>
+        <li>Identify design tokens (colors, typography, spacing)</li>
+        <li>Capture full-page screenshots via Chrome DevTools Protocol</li>
+      </ul>
+      <p>
+        No data is retained between sessions. When you close the extension popup or navigate away,
+        any in-memory data is discarded. PageGrab does not write to <code>chrome.storage</code>,
+        <code>localStorage</code>, <code>IndexedDB</code>, or any other persistent storage mechanism.
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Third-Party Services</h2>
+      <p>
+        PageGrab does not integrate with any third-party services. There are no analytics SDKs,
+        no crash-reporting libraries, no advertising networks, and no external API calls of any kind.
+        No data is shared with any third party.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. Permissions Explained</h2>
+      <p>
+        PageGrab requests the following Chrome extension permissions. Each permission is used
+        strictly for the stated purpose and nothing else.
+      </p>
+      <table class="permission-table">
+        <thead>
+          <tr>
+            <th>Permission</th>
+            <th>Why it is needed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>activeTab</code></td>
+            <td>
+              Grants temporary access to the tab you are currently viewing, only while the
+              extension popup is open. Required to read page content for extraction and analysis.
+            </td>
+          </tr>
+          <tr>
+            <td><code>scripting</code></td>
+            <td>
+              Allows PageGrab to inject content scripts into the active tab in order to traverse
+              the DOM, read computed styles, and identify layout components.
+            </td>
+          </tr>
+          <tr>
+            <td><code>downloads</code></td>
+            <td>
+              Used to save extracted text, JSON output, or screenshot image files directly to
+              your local filesystem. No file data passes through any server.
+            </td>
+          </tr>
+          <tr>
+            <td><code>debugger</code></td>
+            <td>
+              Required to attach to the Chrome DevTools Protocol, which enables full-page
+              screenshots that capture content beyond the visible viewport. This attachment
+              is active only during screenshot capture and is released immediately after.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        No permissions beyond those listed above are requested. PageGrab does not request access
+        to browsing history, bookmarks, cookies, or any other sensitive browser data.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Children's Privacy</h2>
+      <p>
+        PageGrab is a developer tool and is not directed at children under the age of 13.
+        Because the extension collects no personal information from any user, no special
+        provisions for children's data are necessary.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Changes to This Policy</h2>
+      <p>
+        If PageGrab's data practices change in the future (for example, if a cloud feature is
+        added), this privacy policy will be updated before that version is released to the
+        Chrome Web Store. The effective date at the top of this page will reflect the date of
+        the most recent revision.
+      </p>
+      <p>
+        Continued use of the extension after a policy update constitutes acceptance of the
+        revised terms. Users are encouraged to review this page periodically.
+      </p>
+    </section>
+
+    <section>
+      <h2>7. Contact</h2>
+      <p>
+        If you have any questions or concerns about this privacy policy or PageGrab's behavior,
+        please contact the developer:
+      </p>
+      <p>
+        <strong>Daiki Soga</strong><br>
+        <a href="mailto:because@because-and.co.jp">because@because-and.co.jp</a>
+      </p>
+    </section>
+
+    <footer>
+      <p>PageGrab Privacy Policy &mdash; Last updated March 2026</p>
+    </footer>
+
+  </div>
+</body>
+</html>
