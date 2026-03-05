@@ -69,6 +69,28 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (message.action === "screenshot") {
+      captureFullPage(message.tabId, message.url)
+        .then((filename) => {
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "done",
+            message: `Screenshot saved: ${filename}`,
+          } satisfies Message);
+          sendResponse({ success: true, filename });
+        })
+        .catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "error",
+            message: errorMsg,
+          } satisfies Message);
+          sendResponse({ success: false, error: errorMsg });
+        });
+      return true;
+    }
+
     if (message.action === "save-analysis") {
       saveAnalysis(message.data)
         .then((result) => {
@@ -583,6 +605,100 @@ ${data.html}
   ]);
 
   return { dir };
+}
+
+// ── Full-page screenshot ─────────────────────────────────────
+
+function debuggerSend(
+  target: chrome.debugger.Debuggee,
+  method: string,
+  params?: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve((result ?? {}) as Record<string, unknown>);
+      }
+    });
+  });
+}
+
+async function captureFullPage(tabId: number, url: string): Promise<string> {
+  const target: chrome.debugger.Debuggee = { tabId };
+
+  // Attach debugger
+  await new Promise<void>((resolve, reject) => {
+    chrome.debugger.attach(target, "1.3", () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve();
+      }
+    });
+  });
+
+  try {
+    // Get full page dimensions
+    const metrics = await debuggerSend(target, "Page.getLayoutMetrics");
+    const contentSize = metrics.cssContentSize as { width: number; height: number };
+    const width = Math.ceil(contentSize.width);
+    const height = Math.ceil(contentSize.height);
+
+    // Cap height to prevent Chrome from crashing on extremely tall pages
+    const maxHeight = 16384;
+    const captureHeight = Math.min(height, maxHeight);
+
+    // Override device metrics to full page size
+    await debuggerSend(target, "Emulation.setDeviceMetricsOverride", {
+      mobile: false,
+      width,
+      height: captureHeight,
+      deviceScaleFactor: 1,
+    });
+
+    // Capture screenshot
+    const screenshot = await debuggerSend(target, "Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+    });
+
+    // Reset device metrics
+    await debuggerSend(target, "Emulation.clearDeviceMetricsOverride");
+
+    // Save the PNG
+    const slug = generateSlug(url);
+    const filename = `pagegrab/screenshots/${slug}.png`;
+    const dataUrl = `data:image/png;base64,${screenshot.data as string}`;
+
+    await new Promise<void>((resolve, reject) => {
+      chrome.downloads.download(
+        {
+          url: dataUrl,
+          filename,
+          saveAs: false,
+          conflictAction: "uniquify",
+        },
+        (downloadId) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (downloadId === undefined) {
+            reject(new Error("Screenshot download failed"));
+          } else {
+            resolve();
+          }
+        }
+      );
+    });
+
+    return filename;
+  } finally {
+    // Always detach debugger
+    chrome.debugger.detach(target, () => {
+      // Ignore detach errors
+    });
+  }
 }
 
 // ── Shared utilities ─────────────────────────────────────────

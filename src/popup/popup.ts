@@ -1,9 +1,10 @@
-import type { Message } from "../types";
+import type { Message, ScreenshotMessage } from "../types";
 
 const extractBtn = document.getElementById("extract-btn") as HTMLButtonElement;
 const analyzeBtn = document.getElementById("analyze-btn") as HTMLButtonElement;
 const designSystemBtn = document.getElementById("design-system-btn") as HTMLButtonElement;
 const pickComponentBtn = document.getElementById("pick-component-btn") as HTMLButtonElement;
+const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 
 function setStatus(text: string, type: "info" | "success" | "error" = "info") {
@@ -16,6 +17,7 @@ function setButtonsDisabled(disabled: boolean) {
   analyzeBtn.disabled = disabled;
   designSystemBtn.disabled = disabled;
   pickComponentBtn.disabled = disabled;
+  screenshotBtn.disabled = disabled;
 }
 
 async function injectAndSendAction(action: "extract" | "analyze" | "design-system" | "pick-component", statusText: string) {
@@ -76,6 +78,35 @@ designSystemBtn.addEventListener("click", () => {
 
 pickComponentBtn.addEventListener("click", () => {
   injectAndSendAction("pick-component", "Click an element to extract...");
+});
+
+screenshotBtn.addEventListener("click", async () => {
+  setButtonsDisabled(true);
+  setStatus("Capturing full page...", "info");
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url) {
+    setStatus("No active tab", "error");
+    setButtonsDisabled(false);
+    return;
+  }
+
+  // Screenshot goes directly to service-worker (no content script needed)
+  const msg: ScreenshotMessage = { action: "screenshot", tabId: tab.id, url: tab.url };
+  chrome.runtime.sendMessage(msg, (response) => {
+    if (chrome.runtime.lastError) {
+      setStatus(`Error: ${chrome.runtime.lastError.message}`, "error");
+      setButtonsDisabled(false);
+      return;
+    }
+    if (response?.success) {
+      setStatus(`Saved: ${response.filename}`, "success");
+      setButtonsDisabled(false);
+    } else {
+      setStatus(`Error: ${response?.error ?? "Unknown"}`, "error");
+      setButtonsDisabled(false);
+    }
+  });
 });
 
 // Listen for status updates from background

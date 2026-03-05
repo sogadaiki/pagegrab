@@ -4,6 +4,7 @@ export type MessageAction =
   | "analyze" | "save-analysis"
   | "design-system" | "save-design-system"
   | "pick-component" | "save-component"
+  | "screenshot"
   | "status";
 
 export interface ExtractMessage {
@@ -33,6 +34,12 @@ export interface SaveDesignSystemMessage {
   data: DesignSystemAnalysis;
 }
 
+export interface ScreenshotMessage {
+  action: "screenshot";
+  tabId: number;
+  url: string;
+}
+
 export interface PickComponentMessage {
   action: "pick-component";
 }
@@ -55,6 +62,7 @@ export type Message =
   | SaveAnalysisMessage
   | DesignSystemMessage
   | SaveDesignSystemMessage
+  | ScreenshotMessage
   | PickComponentMessage
   | SaveComponentMessage
   | StatusMessage;
