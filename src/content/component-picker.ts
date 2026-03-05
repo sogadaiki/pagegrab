@@ -219,10 +219,10 @@ const DEFAULTS: Record<string, string[]> = {
   "background-color": ["rgba(0, 0, 0, 0)", "transparent"],
   "background-image": ["none"],
   "background-size": ["auto"], "background-position": ["0% 0%"],
-  "border": ["none", "0px none rgb(0, 0, 0)"],
+  "border": ["none"],
   "border-radius": ["0px"],
-  "border-top": ["0px none rgb(0, 0, 0)"], "border-right": ["0px none rgb(0, 0, 0)"],
-  "border-bottom": ["0px none rgb(0, 0, 0)"], "border-left": ["0px none rgb(0, 0, 0)"],
+  "border-top": ["none"], "border-right": ["none"],
+  "border-bottom": ["none"], "border-left": ["none"],
   "box-shadow": ["none"],
   "opacity": ["1"],
   "overflow": ["visible"],
@@ -239,6 +239,9 @@ function getRelevantStyles(el: Element): string[] {
 
     const defaults = DEFAULTS[prop];
     if (defaults && defaults.includes(value)) continue;
+
+    // Skip border properties with 0px width (e.g. "0px none rgb(51, 51, 51)")
+    if (prop.startsWith("border") && prop !== "border-radius" && /^0px\b/.test(value)) continue;
 
     styles.push(`${prop}: ${value}`);
   }

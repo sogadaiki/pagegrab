@@ -326,23 +326,16 @@ function generateTokensCss(data: DesignSystemAnalysis): string {
   lines.push("");
   lines.push(":root {");
 
-  // Spacing
+  // Spacing -- use px value as key to avoid collisions
   lines.push("  /* Spacing */");
   const base = data.spacing.baseUnit;
   lines.push(`  --spacing-base: ${base}px;`);
-  const spacingSteps = data.spacing.scale
-    .filter((s) => s.count >= 3 && s.px % base === 0)
-    .slice(0, 20);
-  for (const token of spacingSteps) {
-    const multiplier = token.px / base;
-    lines.push(`  --spacing-${multiplier}: ${token.px}px; /* ${token.count}x used */`);
-  }
-  // Also include non-base-aligned spacing values with high usage
-  const oddSpacing = data.spacing.scale
-    .filter((s) => s.count >= 5 && s.px % base !== 0)
-    .slice(0, 10);
-  for (const token of oddSpacing) {
-    lines.push(`  --spacing-${token.px}: ${token.px}px; /* ${token.count}x used */`);
+  const allSpacing = data.spacing.scale
+    .filter((s) => s.count >= 3)
+    .slice(0, 25);
+  for (const token of allSpacing) {
+    const label = token.px % base === 0 ? ` (${token.px / base} * base)` : "";
+    lines.push(`  --spacing-${token.px}: ${token.px}px; /* ${token.count}x used${label} */`);
   }
   lines.push("");
 
@@ -368,10 +361,12 @@ function generateTokensCss(data: DesignSystemAnalysis): string {
 
   // Font families
   const families = data.typography.families.slice(0, 5);
+  const genericFonts = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui"]);
   if (families.length > 0) {
-    lines.push(`  --font-primary: "${families[0]}", sans-serif;`);
+    const formatFamily = (f: string) => genericFonts.has(f.toLowerCase()) ? f : `"${f}"`;
+    lines.push(`  --font-primary: ${formatFamily(families[0])}, sans-serif;`);
     if (families.length > 1) {
-      lines.push(`  --font-secondary: "${families[1]}", sans-serif;`);
+      lines.push(`  --font-secondary: ${formatFamily(families[1])}, sans-serif;`);
     }
   }
   lines.push("");
@@ -411,8 +406,8 @@ function generateTailwindConfig(data: DesignSystemAnalysis): string {
     .filter((s) => s.count >= 3)
     .slice(0, 25);
   for (const token of spacingSteps) {
-    const key = token.px % base === 0 ? String(token.px / base) : `"${token.px}"`;
-    spacingEntries.push(`      ${key}: "${token.px}px",`);
+    // Always use px value as key to avoid collisions between base-multiples and raw px
+    spacingEntries.push(`      "${token.px}": "${token.px}px",`);
   }
 
   // Font size object
