@@ -1,6 +1,7 @@
 import type { ExtractedContent, Message, SaveMessage, SaveAnalysisMessage, SaveDesignSystemMessage } from "../types";
 import { analyzeLPDesign } from "./lp-analyzer";
 import { analyzeDesignSystem } from "./design-system-analyzer";
+import { activatePicker } from "./component-picker";
 
 // ── Site detection ──────────────────────────────────────────
 
@@ -836,6 +837,12 @@ chrome.runtime.onMessage.addListener(
         const errorMsg = err instanceof Error ? err.message : String(err);
         sendResponse({ success: false, error: errorMsg });
       }
+      return true;
+    }
+
+    if (message.action === "pick-component") {
+      activatePicker();
+      sendResponse({ success: true, title: "Component picker activated" });
       return true;
     }
   }

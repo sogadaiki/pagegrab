@@ -1,5 +1,10 @@
 // Messages between components
-export type MessageAction = "extract" | "save" | "analyze" | "save-analysis" | "design-system" | "save-design-system" | "status";
+export type MessageAction =
+  | "extract" | "save"
+  | "analyze" | "save-analysis"
+  | "design-system" | "save-design-system"
+  | "pick-component" | "save-component"
+  | "status";
 
 export interface ExtractMessage {
   action: "extract";
@@ -28,6 +33,15 @@ export interface SaveDesignSystemMessage {
   data: DesignSystemAnalysis;
 }
 
+export interface PickComponentMessage {
+  action: "pick-component";
+}
+
+export interface SaveComponentMessage {
+  action: "save-component";
+  data: ComponentExtraction & { url: string };
+}
+
 export interface StatusMessage {
   action: "status";
   status: "extracting" | "saving" | "analyzing" | "done" | "error";
@@ -41,6 +55,8 @@ export type Message =
   | SaveAnalysisMessage
   | DesignSystemMessage
   | SaveDesignSystemMessage
+  | PickComponentMessage
+  | SaveComponentMessage
   | StatusMessage;
 
 // Extracted content structure
@@ -129,6 +145,42 @@ export interface ColorToken {
   properties: string[];
 }
 
+export interface LayoutInfo {
+  type: "flex" | "grid" | "block";
+  direction: string;
+  wrap: string;
+  gap: string;
+  columns: string;
+  rows: string;
+  childCount: number;
+  selector: string;
+}
+
+export interface BreakpointInfo {
+  query: string;
+  minWidth: number | null;
+  maxWidth: number | null;
+  ruleCount: number;
+}
+
+export interface SectionInfo {
+  tag: string;
+  role: string;
+  pattern: "hero" | "features" | "cta" | "testimonials" | "pricing" | "faq" | "footer" | "header" | "nav" | "content" | "unknown";
+  heading: string;
+  depth: number;
+  hasBackground: boolean;
+  hasCta: boolean;
+  estimatedHeight: number;
+}
+
+export interface ComponentExtraction {
+  html: string;
+  css: string;
+  selector: string;
+  boundingRect: { x: number; y: number; width: number; height: number };
+}
+
 export interface DesignSystemAnalysis {
   url: string;
   extractedAt: string;
@@ -148,6 +200,11 @@ export interface DesignSystemAnalysis {
     backgrounds: ColorToken[];
     borders: ColorToken[];
     texts: ColorToken[];
+  };
+  layout: {
+    patterns: LayoutInfo[];
+    breakpoints: BreakpointInfo[];
+    sections: SectionInfo[];
   };
 }
 

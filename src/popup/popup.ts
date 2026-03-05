@@ -3,6 +3,7 @@ import type { Message } from "../types";
 const extractBtn = document.getElementById("extract-btn") as HTMLButtonElement;
 const analyzeBtn = document.getElementById("analyze-btn") as HTMLButtonElement;
 const designSystemBtn = document.getElementById("design-system-btn") as HTMLButtonElement;
+const pickComponentBtn = document.getElementById("pick-component-btn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 
 function setStatus(text: string, type: "info" | "success" | "error" = "info") {
@@ -14,9 +15,10 @@ function setButtonsDisabled(disabled: boolean) {
   extractBtn.disabled = disabled;
   analyzeBtn.disabled = disabled;
   designSystemBtn.disabled = disabled;
+  pickComponentBtn.disabled = disabled;
 }
 
-async function injectAndSendAction(action: "extract" | "analyze" | "design-system", statusText: string) {
+async function injectAndSendAction(action: "extract" | "analyze" | "design-system" | "pick-component", statusText: string) {
   setButtonsDisabled(true);
   setStatus(statusText, "info");
 
@@ -70,6 +72,10 @@ analyzeBtn.addEventListener("click", () => {
 
 designSystemBtn.addEventListener("click", () => {
   injectAndSendAction("design-system", "Extracting Design System...");
+});
+
+pickComponentBtn.addEventListener("click", () => {
+  injectAndSendAction("pick-component", "Click an element to extract...");
 });
 
 // Listen for status updates from background

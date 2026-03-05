@@ -4,6 +4,7 @@ import type {
   TypographyToken,
   ColorToken,
 } from "../types";
+import { analyzeLayout } from "./layout-analyzer";
 
 export function analyzeDesignSystem(): DesignSystemAnalysis {
   return {
@@ -14,6 +15,7 @@ export function analyzeDesignSystem(): DesignSystemAnalysis {
     spacing: extractSpacing(),
     typography: extractTypography(),
     colors: extractColorSystem(),
+    layout: analyzeLayout(),
   };
 }
 

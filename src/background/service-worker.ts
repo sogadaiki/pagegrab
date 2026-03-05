@@ -1,4 +1,4 @@
-import type { Message, LPAnalysis, DesignSystemAnalysis } from "../types";
+import type { Message, LPAnalysis, DesignSystemAnalysis, ComponentExtraction } from "../types";
 import { generateFilename, generateImageDir, generateSlug } from "../types";
 
 chrome.runtime.onMessage.addListener(
@@ -32,6 +32,28 @@ chrome.runtime.onMessage.addListener(
             action: "status",
             status: "done",
             message: `Design System saved: ${result.dir} (${result.fileCount} files)`,
+          } satisfies Message);
+          sendResponse({ success: true, filename: result.dir });
+        })
+        .catch((err) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "error",
+            message: errorMsg,
+          } satisfies Message);
+          sendResponse({ success: false, error: errorMsg });
+        });
+      return true;
+    }
+
+    if (message.action === "save-component") {
+      saveComponent(message.data)
+        .then((result) => {
+          chrome.runtime.sendMessage({
+            action: "status",
+            status: "done",
+            message: `Component saved: ${result.dir}`,
           } satisfies Message);
           sendResponse({ success: true, filename: result.dir });
         })
@@ -283,15 +305,17 @@ async function saveDesignSystem(data: DesignSystemAnalysis): Promise<DesignSyste
 
   const tokensCss = generateTokensCss(data);
   const tailwindConfig = generateTailwindConfig(data);
+  const layoutMd = generateLayoutMarkdown(data);
   const tokensJson = JSON.stringify(data, null, 2);
 
   await Promise.allSettled([
     downloadTextFile(tokensCss, `${dir}/tokens.css`, "text/css;charset=utf-8"),
     downloadTextFile(tailwindConfig, `${dir}/tailwind.config.js`, "text/javascript;charset=utf-8"),
+    downloadTextFile(layoutMd, `${dir}/layout.md`, "text/markdown;charset=utf-8"),
     downloadTextFile(tokensJson, `${dir}/tokens.json`, "application/json"),
   ]);
 
-  return { dir, fileCount: 3 };
+  return { dir, fileCount: 4 };
 }
 
 function generateTokensCss(data: DesignSystemAnalysis): string {
@@ -460,6 +484,110 @@ ${colorEntries.join("\n")}
   },
 };
 `;
+}
+
+function generateLayoutMarkdown(data: DesignSystemAnalysis): string {
+  const lines: string[] = [];
+  lines.push(`# Layout Analysis: ${data.title}`);
+  lines.push(`Source: ${data.url}`);
+  lines.push(`Extracted: ${data.extractedAt}`);
+  lines.push("");
+
+  // Breakpoints
+  if (data.layout.breakpoints.length > 0) {
+    lines.push("## Breakpoints");
+    lines.push("");
+    lines.push("| Query | Min Width | Max Width | Rules |");
+    lines.push("|-------|-----------|-----------|-------|");
+    for (const bp of data.layout.breakpoints) {
+      const min = bp.minWidth !== null ? `${bp.minWidth}px` : "-";
+      const max = bp.maxWidth !== null ? `${bp.maxWidth}px` : "-";
+      lines.push(`| \`${bp.query}\` | ${min} | ${max} | ${bp.ruleCount} |`);
+    }
+    lines.push("");
+  }
+
+  // Layout patterns
+  if (data.layout.patterns.length > 0) {
+    lines.push("## Layout Patterns");
+    lines.push("");
+
+    const flexPatterns = data.layout.patterns.filter((p) => p.type === "flex");
+    const gridPatterns = data.layout.patterns.filter((p) => p.type === "grid");
+
+    if (flexPatterns.length > 0) {
+      lines.push("### Flexbox");
+      lines.push("");
+      lines.push("| Selector | Direction | Wrap | Gap | Children |");
+      lines.push("|----------|-----------|------|-----|----------|");
+      for (const p of flexPatterns.slice(0, 15)) {
+        lines.push(`| \`${p.selector}\` | ${p.direction} | ${p.wrap} | ${p.gap} | ${p.childCount} |`);
+      }
+      lines.push("");
+    }
+
+    if (gridPatterns.length > 0) {
+      lines.push("### Grid");
+      lines.push("");
+      lines.push("| Selector | Columns | Rows | Gap | Children |");
+      lines.push("|----------|---------|------|-----|----------|");
+      for (const p of gridPatterns.slice(0, 15)) {
+        const cols = p.columns.length > 60 ? p.columns.slice(0, 57) + "..." : p.columns;
+        lines.push(`| \`${p.selector}\` | \`${cols}\` | \`${p.rows}\` | ${p.gap} | ${p.childCount} |`);
+      }
+      lines.push("");
+    }
+  }
+
+  // Section composition
+  if (data.layout.sections.length > 0) {
+    lines.push("## Page Sections");
+    lines.push("");
+    lines.push("| Pattern | Tag | Heading | Height | Has BG | Has CTA |");
+    lines.push("|---------|-----|---------|--------|--------|---------|");
+    for (const s of data.layout.sections) {
+      lines.push(`| **${s.pattern}** | ${s.tag} | ${s.heading.slice(0, 40)} | ${s.estimatedHeight}px | ${s.hasBackground ? "Y" : "-"} | ${s.hasCta ? "Y" : "-"} |`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+// ── Component save ───────────────────────────────────────────
+
+interface ComponentSaveResult {
+  dir: string;
+}
+
+async function saveComponent(data: ComponentExtraction & { url: string }): Promise<ComponentSaveResult> {
+  const slug = generateSlug(data.url);
+  const dir = `pagegrab/components/${slug}`;
+
+  // Generate standalone HTML preview
+  const previewHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Component: ${data.selector}</title>
+<style>
+${data.css}
+</style>
+</head>
+<body>
+${data.html}
+</body>
+</html>`;
+
+  await Promise.allSettled([
+    downloadTextFile(data.html, `${dir}/component.html`, "text/html;charset=utf-8"),
+    downloadTextFile(data.css, `${dir}/component.css`, "text/css;charset=utf-8"),
+    downloadTextFile(previewHtml, `${dir}/preview.html`, "text/html;charset=utf-8"),
+    downloadTextFile(JSON.stringify(data, null, 2), `${dir}/component.json`, "application/json"),
+  ]);
+
+  return { dir };
 }
 
 // ── Shared utilities ─────────────────────────────────────────
