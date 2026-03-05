@@ -650,22 +650,18 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
     const maxHeight = 16384;
     const captureHeight = Math.min(height, maxHeight);
 
-    // Override device metrics to full page size
-    await debuggerSend(target, "Emulation.setDeviceMetricsOverride", {
-      mobile: false,
-      width,
-      height: captureHeight,
-      deviceScaleFactor: 1,
-    });
-
-    // Capture screenshot
+    // Capture with clip rect -- do NOT change device metrics (causes fixed elements to repeat)
     const screenshot = await debuggerSend(target, "Page.captureScreenshot", {
       format: "png",
       captureBeyondViewport: true,
+      clip: {
+        x: 0,
+        y: 0,
+        width,
+        height: captureHeight,
+        scale: 1,
+      },
     });
-
-    // Reset device metrics
-    await debuggerSend(target, "Emulation.clearDeviceMetricsOverride");
 
     // Save the PNG
     const slug = generateSlug(url);
