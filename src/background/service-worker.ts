@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import type { Message, LPAnalysis, DesignSystemAnalysis, ComponentExtraction } from "../types";
 import { generateFilename, generateImageDir, generateSlug } from "../types";
 
@@ -178,19 +179,33 @@ interface AnalysisSaveResult {
 
 async function saveAnalysis(data: LPAnalysis): Promise<AnalysisSaveResult> {
   const slug = generateSlug(data.url);
-  const imageDir = `pagegrab/images/${slug}`;
+  const zip = new JSZip();
 
-  // Download all images (both <img> and background-image)
+  // Fetch all images and add to ZIP
   const imageMap = new Map<string, string>();
-  const downloadPromises = data.images.map((img, index) => {
+  const fetchPromises = data.images.map(async (img, index) => {
     const prefix = img.type === "background" ? "bg" : "img";
     const ext = guessImageExtension(img.url);
-    const localFilename = `${imageDir}/${prefix}_${String(index + 1).padStart(3, "0")}.${ext}`;
-    imageMap.set(img.url, localFilename);
-    return downloadFile(img.url, localFilename);
+    const filename = `${prefix}_${String(index + 1).padStart(3, "0")}.${ext}`;
+    const zipPath = `images/${filename}`;
+    imageMap.set(img.url, zipPath);
+
+    try {
+      const response = await fetch(img.url, {
+        headers: { "Referer": data.url },
+      });
+      if (!response.ok) {
+        console.warn(`[PageGrab] Image fetch failed (${response.status}): ${img.url}`);
+        return;
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      zip.file(zipPath, arrayBuffer);
+    } catch (err) {
+      console.warn(`[PageGrab] Image fetch error: ${img.url}`, err);
+    }
   });
 
-  await Promise.allSettled(downloadPromises);
+  await Promise.allSettled(fetchPromises);
 
   // Build analysis JSON with local paths
   const analysisWithLocalPaths = {
@@ -201,19 +216,32 @@ async function saveAnalysis(data: LPAnalysis): Promise<AnalysisSaveResult> {
     })),
   };
 
-  // Save JSON
-  const jsonFile = `pagegrab/analysis/${slug}.json`;
-  const jsonContent = JSON.stringify(analysisWithLocalPaths, null, 2);
-  await downloadTextFile(jsonContent, jsonFile, "application/json");
+  zip.file("analysis.json", JSON.stringify(analysisWithLocalPaths, null, 2));
+  zip.file("analysis.md", buildAnalysisMarkdown(data, imageMap));
 
-  // Save Markdown summary
-  const mdFile = `pagegrab/analysis/${slug}.md`;
-  const mdContent = buildAnalysisMarkdown(data, imageMap);
-  await downloadTextFile(mdContent, mdFile, "text/markdown;charset=utf-8");
+  // Generate ZIP and download as single file
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  const zipDataUrl = await blobToDataUrl(zipBlob);
+  const zipFile = `pagegrab/analysis/${slug}.zip`;
+
+  await new Promise<void>((resolve, reject) => {
+    chrome.downloads.download(
+      { url: zipDataUrl, filename: zipFile, saveAs: false, conflictAction: "overwrite" },
+      (downloadId) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (downloadId === undefined) {
+          reject(new Error("ZIP download failed"));
+        } else {
+          resolve();
+        }
+      }
+    );
+  });
 
   return {
-    jsonFile,
-    imageCount: data.images.length,
+    jsonFile: zipFile,
+    imageCount: imageMap.size,
     fontCount: data.fonts.used.length,
     colorCount: data.colors.palette.length,
   };
@@ -292,7 +320,7 @@ function buildAnalysisMarkdown(
     lines.push(`### <img> Tags (${imgTagImages.length})`);
     lines.push("");
     for (const img of imgTagImages) {
-      const localPath = toRelativeImagePath(imageMap.get(img.url) ?? "");
+      const localPath = imageMap.get(img.url) ?? "";
       const dims = img.width && img.height ? ` (${img.width}x${img.height})` : "";
       const alt = img.alt ? ` - ${img.alt}` : "";
       lines.push(`- ![${img.alt || "image"}](${localPath})${dims}${alt}`);
@@ -304,7 +332,7 @@ function buildAnalysisMarkdown(
     lines.push(`### CSS Background Images (${bgImages.length})`);
     lines.push("");
     for (const img of bgImages) {
-      const localPath = toRelativeImagePath(imageMap.get(img.url) ?? "");
+      const localPath = imageMap.get(img.url) ?? "";
       const dims = img.width && img.height ? ` (${img.width}x${img.height})` : "";
       lines.push(`- ![bg](${localPath})${dims}`);
     }
