@@ -5,6 +5,7 @@ import type {
   ColorToken,
 } from "../types";
 import { analyzeLayout } from "./layout-analyzer";
+import { analyzeCssProperties } from "./css-property-analyzer";
 
 export function analyzeDesignSystem(): DesignSystemAnalysis {
   return {
@@ -16,6 +17,7 @@ export function analyzeDesignSystem(): DesignSystemAnalysis {
     typography: extractTypography(),
     colors: extractColorSystem(),
     layout: analyzeLayout(),
+    cssProperties: analyzeCssProperties(),
   };
 }
 

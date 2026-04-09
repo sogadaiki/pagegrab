@@ -182,6 +182,47 @@ export interface SectionInfo {
   estimatedHeight: number;
 }
 
+export interface CssCustomProperty {
+  name: string;
+  value: string;
+  scope: string;
+  count: number;
+}
+
+export interface BorderRadiusToken {
+  value: string;
+  px: number;
+  count: number;
+  contexts: string[];
+}
+
+export interface BoxShadowToken {
+  value: string;
+  count: number;
+  contexts: string[];
+}
+
+export interface GradientToken {
+  value: string;
+  type: "linear" | "radial" | "conic";
+  count: number;
+  contexts: string[];
+}
+
+export interface TransitionToken {
+  property: string;
+  duration: string;
+  timing: string;
+  count: number;
+}
+
+export interface ContainerWidthToken {
+  value: string;
+  px: number;
+  count: number;
+  selectors: string[];
+}
+
 export interface ComponentExtraction {
   html: string;
   css: string;
@@ -213,6 +254,14 @@ export interface DesignSystemAnalysis {
     patterns: LayoutInfo[];
     breakpoints: BreakpointInfo[];
     sections: SectionInfo[];
+  };
+  cssProperties: {
+    customProperties: CssCustomProperty[];
+    borderRadius: BorderRadiusToken[];
+    boxShadows: BoxShadowToken[];
+    gradients: GradientToken[];
+    transitions: TransitionToken[];
+    containerWidths: ContainerWidthToken[];
   };
 }
 

@@ -357,15 +357,17 @@ async function saveDesignSystem(data: DesignSystemAnalysis): Promise<DesignSyste
   const tailwindConfig = generateTailwindConfig(data);
   const layoutMd = generateLayoutMarkdown(data);
   const tokensJson = JSON.stringify(data, null, 2);
+  const designRef = generateDesignReference(data);
 
   await Promise.allSettled([
     downloadTextFile(tokensCss, `${dir}/tokens.css`, "text/css;charset=utf-8"),
     downloadTextFile(tailwindConfig, `${dir}/tailwind.config.js`, "text/javascript;charset=utf-8"),
     downloadTextFile(layoutMd, `${dir}/layout.md`, "text/markdown;charset=utf-8"),
     downloadTextFile(tokensJson, `${dir}/tokens.json`, "application/json"),
+    downloadTextFile(designRef, `${dir}/DESIGN-REFERENCE.md`, "text/markdown;charset=utf-8"),
   ]);
 
-  return { dir, fileCount: 4 };
+  return { dir, fileCount: 5 };
 }
 
 function generateTokensCss(data: DesignSystemAnalysis): string {
@@ -434,6 +436,52 @@ function generateTokensCss(data: DesignSystemAnalysis): string {
   writeColorVars(lines, "neutral", neutralColors);
   writeColorVars(lines, "bg", bgColors);
   writeColorVars(lines, "border", borderColors);
+  lines.push("");
+
+  // Source CSS Custom Properties
+  if (data.cssProperties.customProperties.length > 0) {
+    lines.push("  /* Source CSS Custom Properties */");
+    for (const prop of data.cssProperties.customProperties.slice(0, 50)) {
+      lines.push(`  ${prop.name}: ${prop.value}; /* ${prop.scope} — ${prop.count}x referenced */`);
+    }
+    lines.push("");
+  }
+
+  // Border Radius
+  if (data.cssProperties.borderRadius.length > 0) {
+    lines.push("  /* Border Radius */");
+    const radiusSizeNames = ["sm", "md", "lg", "xl", "2xl", "full"];
+    const sortedRadius = [...data.cssProperties.borderRadius].sort((a, b) => a.px - b.px);
+    sortedRadius.slice(0, 6).forEach((token, i) => {
+      const name = radiusSizeNames[i] ?? `r${i + 1}`;
+      lines.push(`  --radius-${name}: ${token.value}; /* ${token.count}x used */`);
+    });
+    lines.push("");
+  }
+
+  // Box Shadow
+  if (data.cssProperties.boxShadows.length > 0) {
+    lines.push("  /* Box Shadows */");
+    const shadowSizeNames = ["sm", "md", "lg", "xl", "2xl"];
+    const sortedShadows = [...data.cssProperties.boxShadows].sort((a, b) => b.count - a.count);
+    sortedShadows.slice(0, 5).forEach((token, i) => {
+      const name = shadowSizeNames[i] ?? `s${i + 1}`;
+      lines.push(`  --shadow-${name}: ${token.value}; /* ${token.count}x used */`);
+    });
+    lines.push("");
+  }
+
+  // Container Widths
+  if (data.cssProperties.containerWidths.length > 0) {
+    lines.push("  /* Container Widths */");
+    const containerSizeNames = ["sm", "md", "lg", "xl", "2xl"];
+    const sortedContainers = [...data.cssProperties.containerWidths].sort((a, b) => a.px - b.px);
+    sortedContainers.slice(0, 5).forEach((token, i) => {
+      const name = containerSizeNames[i] ?? `c${i + 1}`;
+      lines.push(`  --container-${name}: ${token.value}; /* ${token.count}x used */`);
+    });
+    lines.push("");
+  }
 
   lines.push("}");
   lines.push("");
@@ -507,6 +555,33 @@ function generateTailwindConfig(data: DesignSystemAnalysis): string {
     }
   }
 
+  // Border Radius entries
+  const borderRadiusEntries: string[] = [];
+  const radiusSizeNames = ["sm", "md", "lg", "xl", "2xl", "full"];
+  const sortedRadius = [...data.cssProperties.borderRadius].sort((a, b) => a.px - b.px);
+  sortedRadius.slice(0, 6).forEach((token, i) => {
+    const name = radiusSizeNames[i] ?? `r${i + 1}`;
+    borderRadiusEntries.push(`      "${name}": "${token.value}",`);
+  });
+
+  // Box Shadow entries
+  const boxShadowEntries: string[] = [];
+  const shadowSizeNames = ["sm", "md", "lg", "xl", "2xl"];
+  const sortedShadows = [...data.cssProperties.boxShadows].sort((a, b) => b.count - a.count);
+  sortedShadows.slice(0, 5).forEach((token, i) => {
+    const name = shadowSizeNames[i] ?? `s${i + 1}`;
+    boxShadowEntries.push(`      "${name}": "${token.value.replace(/"/g, "'")}",`);
+  });
+
+  // Max-width (container widths) entries
+  const maxWidthEntries: string[] = [];
+  const containerSizeNames = ["sm", "md", "lg", "xl", "2xl"];
+  const sortedContainers = [...data.cssProperties.containerWidths].sort((a, b) => a.px - b.px);
+  sortedContainers.slice(0, 5).forEach((token, i) => {
+    const name = containerSizeNames[i] ?? `c${i + 1}`;
+    maxWidthEntries.push(`      "${name}": "${token.value}",`);
+  });
+
   return `/** @type {import('tailwindcss').Config} */
 // Design System extracted from: ${data.url}
 // Extracted: ${data.extractedAt}
@@ -524,6 +599,15 @@ ${familyEntries.join("\n")}
       },
       colors: {
 ${colorEntries.join("\n")}
+      },
+      borderRadius: {
+${borderRadiusEntries.join("\n")}
+      },
+      boxShadow: {
+${boxShadowEntries.join("\n")}
+      },
+      maxWidth: {
+${maxWidthEntries.join("\n")}
       },
     },
   },
@@ -599,6 +683,240 @@ function generateLayoutMarkdown(data: DesignSystemAnalysis): string {
   return lines.join("\n");
 }
 
+// ── DESIGN-REFERENCE.md generation ──────────────────────────
+
+function generateDesignReference(data: DesignSystemAnalysis): string {
+  const lines: string[] = [];
+
+  lines.push(`# Design Reference: ${data.title}`);
+  lines.push("");
+  lines.push(`> Source: ${data.url}`);
+  lines.push(`> Extracted: ${data.extractedAt}`);
+  lines.push("");
+
+  // Overview
+  lines.push("## Overview");
+  lines.push(`- **Mood**: ${inferMood(data)}`);
+  lines.push(`- **Density**: ${inferDensity(data)}`);
+  lines.push(`- **Key Patterns**: ${inferKeyPatterns(data)}`);
+  lines.push("");
+
+  // CSS Custom Properties
+  if (data.cssProperties.customProperties.length > 0) {
+    lines.push("## CSS Custom Properties");
+    lines.push("");
+    lines.push("```css");
+    lines.push(":root {");
+    for (const prop of data.cssProperties.customProperties.slice(0, 50)) {
+      lines.push(`  ${prop.name}: ${prop.value};`);
+    }
+    lines.push("}");
+    lines.push("```");
+    lines.push("");
+  }
+
+  // Color Tokens
+  if (data.colors.tokens.length > 0) {
+    lines.push("## Color Tokens");
+    lines.push("");
+    lines.push("| Role | Hex | Count |");
+    lines.push("|------|-----|-------|");
+    for (const token of data.colors.tokens.slice(0, 20)) {
+      lines.push(`| ${token.role} | \`${token.hex}\` | ${token.count} |`);
+    }
+    lines.push("");
+  }
+
+  // Typography Scale
+  if (data.typography.scale.length > 0) {
+    lines.push("## Typography Scale");
+    lines.push("");
+    lines.push("| Size | Line Height | Weight | Family | Sample |");
+    lines.push("|------|-------------|--------|--------|--------|");
+    for (const token of data.typography.scale.slice(0, 15)) {
+      const family = token.fontFamily.split(",")[0].trim().replace(/["']/g, "");
+      const sample = token.sampleText.replace(/\|/g, "\\|").replace(/\n/g, " ").slice(0, 40);
+      lines.push(`| ${token.fontSize} | ${token.lineHeight} | ${token.fontWeight} | ${family} | ${sample} |`);
+    }
+    lines.push("");
+  }
+
+  // Spacing
+  lines.push("## Spacing");
+  lines.push(`- Base unit: ${data.spacing.baseUnit}px`);
+  const spacingValues = data.spacing.scale.slice(0, 15).map((s) => s.value).join(", ");
+  lines.push(`- Scale: ${spacingValues}`);
+  lines.push("");
+
+  // Container Widths
+  if (data.cssProperties.containerWidths.length > 0) {
+    lines.push("## Container Widths");
+    lines.push("");
+    lines.push("| Value | px | Count | Selectors |");
+    lines.push("|-------|----|-------|-----------|");
+    for (const token of data.cssProperties.containerWidths) {
+      const selectors = token.selectors.slice(0, 3).join(", ");
+      lines.push(`| ${token.value} | ${token.px} | ${token.count} | ${selectors} |`);
+    }
+    lines.push("");
+  }
+
+  // Border Radius
+  if (data.cssProperties.borderRadius.length > 0) {
+    lines.push("## Border Radius");
+    lines.push("");
+    lines.push("| Value | px | Count | Contexts |");
+    lines.push("|-------|----|-------|----------|");
+    for (const token of data.cssProperties.borderRadius) {
+      const contexts = token.contexts.join(", ");
+      lines.push(`| ${token.value} | ${token.px} | ${token.count} | ${contexts} |`);
+    }
+    lines.push("");
+  }
+
+  // Box Shadows
+  if (data.cssProperties.boxShadows.length > 0) {
+    lines.push("## Box Shadows");
+    lines.push("");
+    for (const token of data.cssProperties.boxShadows) {
+      lines.push(`**Contexts**: ${token.contexts.join(", ")} — used ${token.count}x`);
+      lines.push("");
+      lines.push("```css");
+      lines.push(`box-shadow: ${token.value};`);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+
+  // Gradients
+  if (data.cssProperties.gradients.length > 0) {
+    lines.push("## Gradients");
+    lines.push("");
+    for (const token of data.cssProperties.gradients) {
+      lines.push(`**Type**: ${token.type} — Contexts: ${token.contexts.join(", ")} — used ${token.count}x`);
+      lines.push("");
+      lines.push("```css");
+      lines.push(`background-image: ${token.value};`);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+
+  // Transitions
+  if (data.cssProperties.transitions.length > 0) {
+    lines.push("## Transitions");
+    lines.push("");
+    lines.push("| Property | Duration | Timing | Count |");
+    lines.push("|----------|----------|--------|-------|");
+    for (const token of data.cssProperties.transitions) {
+      lines.push(`| ${token.property} | ${token.duration} | ${token.timing} | ${token.count} |`);
+    }
+    lines.push("");
+  }
+
+  // Layout
+  lines.push("## Layout");
+  lines.push("");
+
+  if (data.layout.breakpoints.length > 0) {
+    lines.push("### Breakpoints");
+    lines.push("");
+    lines.push("| Query | Min Width | Max Width | Rules |");
+    lines.push("|-------|-----------|-----------|-------|");
+    for (const bp of data.layout.breakpoints) {
+      const min = bp.minWidth !== null ? `${bp.minWidth}px` : "-";
+      const max = bp.maxWidth !== null ? `${bp.maxWidth}px` : "-";
+      lines.push(`| \`${bp.query}\` | ${min} | ${max} | ${bp.ruleCount} |`);
+    }
+    lines.push("");
+  }
+
+  if (data.layout.sections.length > 0) {
+    lines.push("### Section Composition");
+    lines.push("");
+    for (const s of data.layout.sections) {
+      const heading = s.heading ? ` — "${s.heading.slice(0, 50)}"` : "";
+      lines.push(`- **${s.pattern}** (${s.tag})${heading}`);
+    }
+    lines.push("");
+  }
+
+  if (data.layout.patterns.length > 0) {
+    lines.push("### Layout Patterns");
+    lines.push("");
+    for (const p of data.layout.patterns.slice(0, 10)) {
+      const detail = p.type === "flex"
+        ? `flex ${p.direction} wrap:${p.wrap} gap:${p.gap} children:${p.childCount}`
+        : `grid cols:${p.columns.slice(0, 40)} gap:${p.gap} children:${p.childCount}`;
+      lines.push(`- \`${p.selector}\` — ${detail}`);
+    }
+    lines.push("");
+  }
+
+  // Tailwind Config
+  lines.push("## Tailwind Config");
+  lines.push("");
+  lines.push("```js");
+  lines.push(generateTailwindConfig(data));
+  lines.push("```");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function inferMood(data: DesignSystemAnalysis): string {
+  const radii = data.cssProperties.borderRadius;
+  if (radii.length === 0) return "Neutral";
+
+  const avgPx = radii.reduce((sum, r) => sum + r.px * r.count, 0) /
+    radii.reduce((sum, r) => sum + r.count, 0);
+
+  let mood: string;
+  if (avgPx <= 2) mood = "Sharp / Corporate";
+  else if (avgPx <= 6) mood = "Balanced / Professional";
+  else if (avgPx <= 12) mood = "Friendly / Approachable";
+  else mood = "Playful / Rounded";
+
+  const shadowCount = data.cssProperties.boxShadows.reduce((sum, s) => sum + s.count, 0);
+  if (shadowCount > 10) mood += " + Layered (heavy shadow use)";
+
+  return mood;
+}
+
+function inferDensity(data: DesignSystemAnalysis): string {
+  const base = data.spacing.baseUnit;
+  if (base <= 4) return "Dense";
+  if (base <= 8) return "Standard";
+  return "Spacious";
+}
+
+function inferKeyPatterns(data: DesignSystemAnalysis): string {
+  const patterns: string[] = [];
+  const sections = data.layout.sections;
+
+  const hasHero = sections.some((s) => s.pattern === "hero");
+  const hasCta = sections.some((s) => s.pattern === "cta");
+  const hasFeatures = sections.some((s) => s.pattern === "features");
+  const hasPricing = sections.some((s) => s.pattern === "pricing");
+  const hasTestimonials = sections.some((s) => s.pattern === "testimonials");
+  const hasFaq = sections.some((s) => s.pattern === "faq");
+
+  if (hasHero) patterns.push("Hero section");
+  if (hasFeatures) patterns.push("Feature showcase");
+  if (hasPricing) patterns.push("Pricing table");
+  if (hasTestimonials) patterns.push("Social proof");
+  if (hasFaq) patterns.push("FAQ section");
+  if (hasCta) patterns.push("Dedicated CTA");
+
+  const gridPatterns = data.layout.patterns.filter((p) => p.type === "grid");
+  if (gridPatterns.length > 0) patterns.push("Grid layouts");
+
+  const hasCards = data.layout.patterns.some((p) => p.childCount >= 3 && p.type === "flex");
+  if (hasCards) patterns.push("Card-based layout");
+
+  return patterns.length > 0 ? patterns.join(", ") : "No clear pattern";
+}
+
 // ── Component save ───────────────────────────────────────────
 
 interface ComponentSaveResult {
@@ -668,19 +986,64 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
   });
 
   try {
-    // Get full page dimensions
-    const metrics = await debuggerSend(target, "Page.getLayoutMetrics");
-    const contentSize = metrics.cssContentSize as { width: number; height: number };
-    const width = Math.ceil(contentSize.width);
-    const height = Math.ceil(contentSize.height);
-
     // Cap height to prevent Chrome from crashing on extremely tall pages
     const maxHeight = 16384;
-    const captureHeight = Math.min(height, maxHeight);
 
-    // Neutralize fixed/sticky elements so they don't repeat at every viewport tile
+    // Detect and unwrap inner scroll containers, neutralize fixed/sticky elements,
+    // and force html+body to be unconstrained so Page.getLayoutMetrics sees the full content
     await debuggerSend(target, "Runtime.evaluate", {
       expression: `(() => {
+        // 1. Detect primary scroll container
+        // scrollHeight - clientHeight が最大の要素を探す（閾値100px、幅がviewportの50%以上）
+        let bestEl = null;
+        let bestDelta = 100;
+        document.querySelectorAll('*').forEach(el => {
+          if (el === document.documentElement || el === document.body) return;
+          const delta = el.scrollHeight - el.clientHeight;
+          if (delta > bestDelta && el.clientWidth >= window.innerWidth * 0.5) {
+            bestDelta = delta;
+            bestEl = el;
+          }
+        });
+
+        // 2. Unwrap scroll container + all ancestors up to body
+        const unwrapped = [];
+        if (bestEl) {
+          let current = bestEl;
+          while (current && current !== document.documentElement) {
+            unwrapped.push({
+              el: current,
+              overflow: current.style.overflow,
+              overflowX: current.style.overflowX,
+              overflowY: current.style.overflowY,
+              height: current.style.height,
+              maxHeight: current.style.maxHeight,
+              minHeight: current.style.minHeight,
+            });
+            current.style.setProperty('overflow', 'visible', 'important');
+            current.style.setProperty('overflow-x', 'visible', 'important');
+            current.style.setProperty('overflow-y', 'visible', 'important');
+            current.style.setProperty('height', 'auto', 'important');
+            current.style.setProperty('max-height', 'none', 'important');
+            current = current.parentElement;
+          }
+        }
+
+        // 3. Force html+body unconstrained
+        const htmlOrig = {
+          overflow: document.documentElement.style.overflow,
+          height: document.documentElement.style.height,
+        };
+        const bodyOrig = {
+          overflow: document.body.style.overflow,
+          height: document.body.style.height,
+        };
+        document.documentElement.style.setProperty('overflow', 'visible', 'important');
+        document.documentElement.style.setProperty('height', 'auto', 'important');
+        document.body.style.setProperty('overflow', 'visible', 'important');
+        document.body.style.setProperty('height', 'auto', 'important');
+
+        // 4. Neutralize fixed/sticky elements
         const fixed = [];
         document.querySelectorAll('*').forEach(el => {
           const pos = getComputedStyle(el).position;
@@ -689,15 +1052,18 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
             el.style.setProperty('position', 'absolute', 'important');
           }
         });
-        document.body.style.setProperty('overflow', 'visible', 'important');
+
+        window.__pagegrab_unwrapped = unwrapped;
         window.__pagegrab_fixed = fixed;
+        window.__pagegrab_html_orig = htmlOrig;
+        window.__pagegrab_body_orig = bodyOrig;
       })()`,
     });
 
-    // Small delay for re-layout
-    await new Promise((r) => setTimeout(r, 300));
+    // Delay for re-layout after style changes
+    await new Promise((r) => setTimeout(r, 500));
 
-    // Re-measure after layout change (fixed elements may affect content size)
+    // Measure after unwrapping scroll containers so full content size is visible
     const metrics2 = await debuggerSend(target, "Page.getLayoutMetrics");
     const contentSize2 = metrics2.cssContentSize as { width: number; height: number };
     const finalWidth = Math.ceil(contentSize2.width);
@@ -714,19 +1080,6 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
         height: finalHeight,
         scale: 1,
       },
-    });
-
-    // Restore original positioning
-    await debuggerSend(target, "Runtime.evaluate", {
-      expression: `(() => {
-        if (window.__pagegrab_fixed) {
-          window.__pagegrab_fixed.forEach(({ el, orig }) => {
-            el.style.position = orig;
-          });
-          delete window.__pagegrab_fixed;
-        }
-        document.body.style.removeProperty('overflow');
-      })()`,
     });
 
     // Save the PNG
@@ -756,6 +1109,40 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
 
     return filename;
   } finally {
+    // Restore original styles — must run even if screenshot or download failed
+    await debuggerSend(target, "Runtime.evaluate", {
+      expression: `(() => {
+        if (window.__pagegrab_unwrapped) {
+          for (const item of window.__pagegrab_unwrapped) {
+            item.el.style.overflow = item.overflow;
+            item.el.style.overflowX = item.overflowX;
+            item.el.style.overflowY = item.overflowY;
+            item.el.style.height = item.height;
+            item.el.style.maxHeight = item.maxHeight;
+            item.el.style.minHeight = item.minHeight;
+          }
+          delete window.__pagegrab_unwrapped;
+        }
+        if (window.__pagegrab_html_orig) {
+          document.documentElement.style.overflow = window.__pagegrab_html_orig.overflow;
+          document.documentElement.style.height = window.__pagegrab_html_orig.height;
+          delete window.__pagegrab_html_orig;
+        }
+        if (window.__pagegrab_body_orig) {
+          document.body.style.overflow = window.__pagegrab_body_orig.overflow;
+          document.body.style.height = window.__pagegrab_body_orig.height;
+          delete window.__pagegrab_body_orig;
+        }
+        if (window.__pagegrab_fixed) {
+          window.__pagegrab_fixed.forEach(({ el, orig }) => {
+            el.style.position = orig;
+          });
+          delete window.__pagegrab_fixed;
+        }
+      })()`,
+    }).catch(() => {
+      // Ignore restore errors — debugger may already be detached
+    });
     // Always detach debugger
     chrome.debugger.detach(target, () => {
       // Ignore detach errors
