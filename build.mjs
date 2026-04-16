@@ -1,7 +1,16 @@
 import { build, context } from "esbuild";
-import { cpSync, mkdirSync } from "fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 
 const isWatch = process.argv.includes("--watch");
+
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
+if (manifest.version !== pkg.version) {
+  throw new Error(
+    `Version mismatch: package.json=${pkg.version} manifest.json=${manifest.version}. ` +
+    `Keep both in sync.`
+  );
+}
 
 const commonOptions = {
   bundle: true,
@@ -42,5 +51,5 @@ if (isWatch) {
   await Promise.all(
     entries.map((entry) => build({ ...commonOptions, ...entry }))
   );
-  console.log("Build complete.");
+  console.log(`Build complete. (v${pkg.version})`);
 }
