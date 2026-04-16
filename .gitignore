@@ -2,3 +2,5 @@ node_modules/
 dist/
 output/
 restart.md
+.DS_Store
+DESIGN.md
