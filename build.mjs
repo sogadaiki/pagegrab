@@ -35,21 +35,38 @@ const entries = [
   },
 ];
 
+// CLI entry — Node platform, ESM, externalize runtime deps
+// tsconfig.cli.json / bin / engines.node は Slice 1b で整備
+const cliEntry = {
+  entryPoints: ["src/cli/index.ts"],
+  outfile: "dist/cli/index.js",
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  external: ["chrome-remote-interface"],
+  banner: { js: "#!/usr/bin/env node" },
+  sourcemap: false,
+  minify: false,
+};
+
 mkdirSync("dist", { recursive: true });
 
 cpSync("manifest.json", "dist/manifest.json");
 cpSync("src/popup/popup.html", "dist/popup.html");
 cpSync("icons", "dist/icons", { recursive: true });
 
+// Extension entries inherit commonOptions; CLI entry carries its own full options
+const extensionBuilds = entries.map((entry) => ({ ...commonOptions, ...entry }));
+
 if (isWatch) {
   const contexts = await Promise.all(
-    entries.map((entry) => context({ ...commonOptions, ...entry }))
+    [...extensionBuilds, cliEntry].map((entry) => context(entry))
   );
   await Promise.all(contexts.map((ctx) => ctx.watch()));
   console.log("Watching for changes...");
 } else {
   await Promise.all(
-    entries.map((entry) => build({ ...commonOptions, ...entry }))
+    [...extensionBuilds, cliEntry].map((entry) => build(entry))
   );
   console.log(`Build complete. (v${pkg.version})`);
 }
