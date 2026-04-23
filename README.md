@@ -20,6 +20,17 @@ PageGrab solves all three: one click to extract structured Markdown + download a
 
 PageGrabはこの3つをワンクリックで解決します。Markdown形式のテキスト + 画像をローカルに保存し、Claude CodeのReadツールでそのまま読み取れます。
 
+## First Read / 初見向けの読み順
+
+1. `README.md`
+2. `AGENTS.md`
+3. `docs/project-context.md`
+4. `docs/legacy-residue.md`
+5. `restart.md`
+
+Chrome 拡張本体は `src/background`, `src/content`, `src/popup` が正本です。
+`src/cli` は進行中の追加レーンで、最新状況は `restart.md` に残っています。
+
 ## Features / 機能
 
 - **テキスト抽出** - DOMベースの抽出。ログイン済みセッションで動作するためBotブロックの影響なし
