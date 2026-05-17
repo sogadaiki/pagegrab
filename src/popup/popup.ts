@@ -6,6 +6,9 @@ const designSystemBtn = document.getElementById("design-system-btn") as HTMLButt
 const pickComponentBtn = document.getElementById("pick-component-btn") as HTMLButtonElement;
 const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
+const versionLabel = document.getElementById("version-label") as HTMLSpanElement;
+
+versionLabel.textContent = `v${chrome.runtime.getManifest().version}`;
 
 function setStatus(text: string, type: "info" | "success" | "error" = "info") {
   statusEl.textContent = text;
@@ -82,7 +85,7 @@ pickComponentBtn.addEventListener("click", () => {
 
 screenshotBtn.addEventListener("click", async () => {
   setButtonsDisabled(true);
-  setStatus("Capturing full page...", "info");
+  setStatus("Capturing high-res screenshot...", "info");
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url) {

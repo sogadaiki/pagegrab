@@ -12,11 +12,22 @@
       color: #1a1a1a;
       background: #fafafa;
     }
+    .header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
     h1 {
       font-size: 16px;
       font-weight: 700;
-      margin-bottom: 12px;
       color: #111;
+    }
+    .version {
+      font-size: 11px;
+      color: #6b7280;
+      white-space: nowrap;
     }
     .btn {
       display: block;
@@ -87,7 +98,10 @@
   </style>
 </head>
 <body>
-  <h1>PageGrab</h1>
+  <div class="header">
+    <h1>PageGrab</h1>
+    <span id="version-label" class="version"></span>
+  </div>
   <button id="extract-btn" class="btn btn-primary">Extract Text</button>
   <button id="analyze-btn" class="btn btn-secondary">LP Analysis</button>
   <button id="design-system-btn" class="btn btn-tertiary">Design System</button>

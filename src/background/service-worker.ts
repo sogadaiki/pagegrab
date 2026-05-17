@@ -955,6 +955,215 @@ ${data.html}
 
 // ── Full-page screenshot ─────────────────────────────────────
 
+const SCREENSHOT_SCALE = 2;
+const MAX_CAPTURE_DEVICE_HEIGHT = 8192;
+const MAX_STITCH_DEVICE_HEIGHT = 30000;
+const MIN_SCROLL_DELTA = 100;
+
+type ScreenshotMode = "full-page" | "visible-viewport";
+
+interface ScreenshotPlan {
+  mode: ScreenshotMode;
+  reason: string;
+  viewportWidth: number;
+  viewportHeight: number;
+  scrollX: number;
+  scrollY: number;
+}
+
+interface ScreenshotArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface RuntimeEvaluateResult<T> {
+  result?: {
+    value?: T;
+  };
+}
+
+const PREPARE_SCREENSHOT_IIFE = `(() => {
+  const viewportWidth = Math.max(1, Math.ceil(window.innerWidth));
+  const viewportHeight = Math.max(1, Math.ceil(window.innerHeight));
+
+  const isVisibleRect = (rect) => (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.bottom > 0 &&
+    rect.top < viewportHeight &&
+    rect.right > 0 &&
+    rect.left < viewportWidth
+  );
+
+  const candidates = [];
+  document.querySelectorAll('*').forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (el === document.documentElement || el === document.body) return;
+
+    const rect = el.getBoundingClientRect();
+    if (!isVisibleRect(rect)) return;
+    if (rect.width < viewportWidth * 0.12) return;
+    if (rect.height < viewportHeight * 0.45) return;
+
+    const style = getComputedStyle(el);
+    const overflowText = style.overflow + ' ' + style.overflowY;
+    const delta = el.scrollHeight - el.clientHeight;
+    const scrollable = /(auto|scroll|overlay)/.test(overflowText) && delta > ${MIN_SCROLL_DELTA};
+    const clippedPane = /(auto|scroll|overlay|hidden|clip)/.test(overflowText) && rect.height >= viewportHeight * 0.55;
+
+    if (!scrollable && !clippedPane) return;
+
+    candidates.push({
+      el,
+      rect: {
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        height: rect.height,
+      },
+      delta,
+      scrollable,
+    });
+  });
+
+  const outerCandidates = candidates.filter((candidate) => {
+    return !candidates.some((other) => {
+      if (other === candidate) return false;
+      if (!other.el.contains(candidate.el)) return false;
+      return other.rect.width >= candidate.rect.width * 0.9 &&
+        other.rect.width <= candidate.rect.width * 1.15 &&
+        other.rect.height >= candidate.rect.height * 0.9 &&
+        other.rect.height <= candidate.rect.height * 1.15;
+    });
+  });
+
+  const columns = [];
+  for (const candidate of outerCandidates.sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height)) {
+    const overlapsColumn = columns.some((column) => {
+      const left = Math.max(candidate.rect.left, column.rect.left);
+      const right = Math.min(candidate.rect.right, column.rect.right);
+      const overlap = Math.max(0, right - left);
+      return overlap / Math.min(candidate.rect.width, column.rect.width) > 0.45;
+    });
+    if (!overlapsColumn) columns.push(candidate);
+  }
+
+  const hasScrollableColumn = columns.some((column) => column.scrollable);
+  if (columns.length >= 2 && hasScrollableColumn) {
+    return {
+      mode: 'visible-viewport',
+      reason: 'multi-column-scroll-layout',
+      viewportWidth,
+      viewportHeight,
+      scrollX: Math.max(0, window.scrollX),
+      scrollY: Math.max(0, window.scrollY),
+    };
+  }
+
+  // Single-flow pages are safe to unwrap for a full-page capture.
+  let bestEl = null;
+  let bestDelta = ${MIN_SCROLL_DELTA};
+  document.querySelectorAll('*').forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (el === document.documentElement || el === document.body) return;
+    const delta = el.scrollHeight - el.clientHeight;
+    if (delta > bestDelta && el.clientWidth >= viewportWidth * 0.5) {
+      bestDelta = delta;
+      bestEl = el;
+    }
+  });
+
+  const unwrapped = [];
+  if (bestEl) {
+    let current = bestEl;
+    while (current && current !== document.documentElement) {
+      unwrapped.push({
+        el: current,
+        overflow: current.style.overflow,
+        overflowX: current.style.overflowX,
+        overflowY: current.style.overflowY,
+        height: current.style.height,
+        maxHeight: current.style.maxHeight,
+        minHeight: current.style.minHeight,
+      });
+      current.style.setProperty('overflow', 'visible', 'important');
+      current.style.setProperty('overflow-x', 'visible', 'important');
+      current.style.setProperty('overflow-y', 'visible', 'important');
+      current.style.setProperty('height', 'auto', 'important');
+      current.style.setProperty('max-height', 'none', 'important');
+      current = current.parentElement;
+    }
+  }
+
+  const htmlOrig = {
+    overflow: document.documentElement.style.overflow,
+    height: document.documentElement.style.height,
+  };
+  const bodyOrig = {
+    overflow: document.body.style.overflow,
+    height: document.body.style.height,
+  };
+  document.documentElement.style.setProperty('overflow', 'visible', 'important');
+  document.documentElement.style.setProperty('height', 'auto', 'important');
+  document.body.style.setProperty('overflow', 'visible', 'important');
+  document.body.style.setProperty('height', 'auto', 'important');
+
+  const fixed = [];
+  document.querySelectorAll('*').forEach((el) => {
+    const pos = getComputedStyle(el).position;
+    if (pos === 'fixed' || pos === 'sticky') {
+      fixed.push({ el, orig: el.style.position });
+      el.style.setProperty('position', 'absolute', 'important');
+    }
+  });
+
+  window.__pagegrab_unwrapped = unwrapped;
+  window.__pagegrab_fixed = fixed;
+  window.__pagegrab_html_orig = htmlOrig;
+  window.__pagegrab_body_orig = bodyOrig;
+
+  return {
+    mode: 'full-page',
+    reason: bestEl ? 'single-scroll-container-unwrapped' : 'document-flow',
+    viewportWidth,
+    viewportHeight,
+    scrollX: Math.max(0, window.scrollX),
+    scrollY: Math.max(0, window.scrollY),
+  };
+})()`;
+
+const RESTORE_SCREENSHOT_IIFE = `(() => {
+  if (window.__pagegrab_unwrapped) {
+    for (const item of window.__pagegrab_unwrapped) {
+      item.el.style.overflow = item.overflow;
+      item.el.style.overflowX = item.overflowX;
+      item.el.style.overflowY = item.overflowY;
+      item.el.style.height = item.height;
+      item.el.style.maxHeight = item.maxHeight;
+      item.el.style.minHeight = item.minHeight;
+    }
+    delete window.__pagegrab_unwrapped;
+  }
+  if (window.__pagegrab_html_orig) {
+    document.documentElement.style.overflow = window.__pagegrab_html_orig.overflow;
+    document.documentElement.style.height = window.__pagegrab_html_orig.height;
+    delete window.__pagegrab_html_orig;
+  }
+  if (window.__pagegrab_body_orig) {
+    document.body.style.overflow = window.__pagegrab_body_orig.overflow;
+    document.body.style.height = window.__pagegrab_body_orig.height;
+    delete window.__pagegrab_body_orig;
+  }
+  if (window.__pagegrab_fixed) {
+    window.__pagegrab_fixed.forEach(({ el, orig }) => {
+      el.style.position = orig;
+    });
+    delete window.__pagegrab_fixed;
+  }
+})()`;
+
 function debuggerSend(
   target: chrome.debugger.Debuggee,
   method: string,
@@ -968,6 +1177,184 @@ function debuggerSend(
         resolve((result ?? {}) as Record<string, unknown>);
       }
     });
+  });
+}
+
+async function prepareScreenshotPage(target: chrome.debugger.Debuggee): Promise<ScreenshotPlan> {
+  const result = await debuggerSend(target, "Runtime.evaluate", {
+    expression: PREPARE_SCREENSHOT_IIFE,
+    returnByValue: true,
+    awaitPromise: false,
+    timeout: 10000,
+  }) as RuntimeEvaluateResult<ScreenshotPlan>;
+
+  if (!result.result?.value) {
+    throw new Error("Screenshot preparation did not return a capture plan");
+  }
+  return result.result.value;
+}
+
+async function stabilizeScreenshotPage(target: chrome.debugger.Debuggee): Promise<void> {
+  await debuggerSend(target, "Runtime.evaluate", {
+    expression: `(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }))()`,
+    awaitPromise: true,
+    timeout: 5000,
+  });
+}
+
+async function getFullPageArea(target: chrome.debugger.Debuggee): Promise<ScreenshotArea> {
+  const metrics = await debuggerSend(target, "Page.getLayoutMetrics");
+  const contentSize = metrics.cssContentSize as { width: number; height: number } | undefined;
+  if (!contentSize) {
+    throw new Error("Page.getLayoutMetrics did not return cssContentSize");
+  }
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(1, Math.ceil(contentSize.width)),
+    height: Math.max(1, Math.ceil(contentSize.height)),
+  };
+}
+
+function getVisibleViewportArea(plan: ScreenshotPlan): ScreenshotArea {
+  return {
+    x: Math.max(0, Math.floor(plan.scrollX)),
+    y: Math.max(0, Math.floor(plan.scrollY)),
+    width: Math.max(1, Math.ceil(plan.viewportWidth)),
+    height: Math.max(1, Math.ceil(plan.viewportHeight)),
+  };
+}
+
+async function capturePngBase64(
+  target: chrome.debugger.Debuggee,
+  area: ScreenshotArea
+): Promise<string> {
+  const screenshot = await debuggerSend(target, "Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: true,
+    clip: {
+      x: area.x,
+      y: area.y,
+      width: area.width,
+      height: area.height,
+      scale: SCREENSHOT_SCALE,
+    },
+  });
+
+  if (typeof screenshot.data !== "string" || screenshot.data.length === 0) {
+    throw new Error("Screenshot capture did not return PNG data");
+  }
+  return screenshot.data;
+}
+
+function base64PngToBlob(data: string): Blob {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: "image/png" });
+}
+
+async function base64PngToImageBitmap(data: string): Promise<ImageBitmap> {
+  return createImageBitmap(base64PngToBlob(data));
+}
+
+function getMaxStripeCssHeight(): number {
+  return Math.max(1, Math.floor(MAX_CAPTURE_DEVICE_HEIGHT / SCREENSHOT_SCALE));
+}
+
+function getMaxPartCssHeight(): number {
+  return Math.max(1, Math.floor(MAX_STITCH_DEVICE_HEIGHT / SCREENSHOT_SCALE));
+}
+
+async function captureAreaAsPngBlob(
+  target: chrome.debugger.Debuggee,
+  area: ScreenshotArea
+): Promise<Blob> {
+  const deviceHeight = Math.ceil(area.height * SCREENSHOT_SCALE);
+  if (deviceHeight <= MAX_CAPTURE_DEVICE_HEIGHT) {
+    return base64PngToBlob(await capturePngBase64(target, area));
+  }
+
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new Error("OffscreenCanvas is required for stitched high-resolution screenshots");
+  }
+
+  const deviceWidth = Math.ceil(area.width * SCREENSHOT_SCALE);
+  const canvas = new OffscreenCanvas(deviceWidth, deviceHeight);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Failed to create screenshot stitch canvas");
+  }
+
+  const maxStripeCssHeight = getMaxStripeCssHeight();
+  let drawnDeviceY = 0;
+  let capturedCssHeight = 0;
+
+  while (capturedCssHeight < area.height) {
+    const stripeCssHeight = Math.min(maxStripeCssHeight, area.height - capturedCssHeight);
+    const stripeArea = {
+      x: area.x,
+      y: area.y + capturedCssHeight,
+      width: area.width,
+      height: stripeCssHeight,
+    };
+    const bitmap = await base64PngToImageBitmap(await capturePngBase64(target, stripeArea));
+    context.drawImage(bitmap, 0, drawnDeviceY);
+    drawnDeviceY += bitmap.height;
+    capturedCssHeight += stripeCssHeight;
+    bitmap.close();
+  }
+
+  return canvas.convertToBlob({ type: "image/png" });
+}
+
+async function captureAreaAsPngParts(
+  target: chrome.debugger.Debuggee,
+  area: ScreenshotArea
+): Promise<Blob[]> {
+  const maxPartCssHeight = getMaxPartCssHeight();
+  const parts: Blob[] = [];
+  let capturedCssHeight = 0;
+
+  while (capturedCssHeight < area.height) {
+    const partCssHeight = Math.min(maxPartCssHeight, area.height - capturedCssHeight);
+    parts.push(await captureAreaAsPngBlob(target, {
+      x: area.x,
+      y: area.y + capturedCssHeight,
+      width: area.width,
+      height: partCssHeight,
+    }));
+    capturedCssHeight += partCssHeight;
+  }
+
+  return parts;
+}
+
+async function downloadPngBlob(blob: Blob, filename: string): Promise<void> {
+  const dataUrl = await blobToDataUrl(blob);
+
+  await new Promise<void>((resolve, reject) => {
+    chrome.downloads.download(
+      {
+        url: dataUrl,
+        filename,
+        saveAs: false,
+        conflictAction: "uniquify",
+      },
+      (downloadId) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (downloadId === undefined) {
+          reject(new Error("Screenshot download failed"));
+        } else {
+          resolve();
+        }
+      }
+    );
   });
 }
 
@@ -986,160 +1373,28 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
   });
 
   try {
-    // Cap height to prevent Chrome from crashing on extremely tall pages
-    const maxHeight = 16384;
+    const plan = await prepareScreenshotPage(target);
+    await stabilizeScreenshotPage(target);
 
-    // Detect and unwrap inner scroll containers, neutralize fixed/sticky elements,
-    // and force html+body to be unconstrained so Page.getLayoutMetrics sees the full content
-    await debuggerSend(target, "Runtime.evaluate", {
-      expression: `(() => {
-        // 1. Detect primary scroll container
-        // scrollHeight - clientHeight が最大の要素を探す（閾値100px、幅がviewportの50%以上）
-        let bestEl = null;
-        let bestDelta = 100;
-        document.querySelectorAll('*').forEach(el => {
-          if (el === document.documentElement || el === document.body) return;
-          const delta = el.scrollHeight - el.clientHeight;
-          if (delta > bestDelta && el.clientWidth >= window.innerWidth * 0.5) {
-            bestDelta = delta;
-            bestEl = el;
-          }
-        });
-
-        // 2. Unwrap scroll container + all ancestors up to body
-        const unwrapped = [];
-        if (bestEl) {
-          let current = bestEl;
-          while (current && current !== document.documentElement) {
-            unwrapped.push({
-              el: current,
-              overflow: current.style.overflow,
-              overflowX: current.style.overflowX,
-              overflowY: current.style.overflowY,
-              height: current.style.height,
-              maxHeight: current.style.maxHeight,
-              minHeight: current.style.minHeight,
-            });
-            current.style.setProperty('overflow', 'visible', 'important');
-            current.style.setProperty('overflow-x', 'visible', 'important');
-            current.style.setProperty('overflow-y', 'visible', 'important');
-            current.style.setProperty('height', 'auto', 'important');
-            current.style.setProperty('max-height', 'none', 'important');
-            current = current.parentElement;
-          }
-        }
-
-        // 3. Force html+body unconstrained
-        const htmlOrig = {
-          overflow: document.documentElement.style.overflow,
-          height: document.documentElement.style.height,
-        };
-        const bodyOrig = {
-          overflow: document.body.style.overflow,
-          height: document.body.style.height,
-        };
-        document.documentElement.style.setProperty('overflow', 'visible', 'important');
-        document.documentElement.style.setProperty('height', 'auto', 'important');
-        document.body.style.setProperty('overflow', 'visible', 'important');
-        document.body.style.setProperty('height', 'auto', 'important');
-
-        // 4. Neutralize fixed/sticky elements
-        const fixed = [];
-        document.querySelectorAll('*').forEach(el => {
-          const pos = getComputedStyle(el).position;
-          if (pos === 'fixed' || pos === 'sticky') {
-            fixed.push({ el, orig: el.style.position });
-            el.style.setProperty('position', 'absolute', 'important');
-          }
-        });
-
-        window.__pagegrab_unwrapped = unwrapped;
-        window.__pagegrab_fixed = fixed;
-        window.__pagegrab_html_orig = htmlOrig;
-        window.__pagegrab_body_orig = bodyOrig;
-      })()`,
-    });
-
-    // Delay for re-layout after style changes
-    await new Promise((r) => setTimeout(r, 500));
-
-    // Measure after unwrapping scroll containers so full content size is visible
-    const metrics2 = await debuggerSend(target, "Page.getLayoutMetrics");
-    const contentSize2 = metrics2.cssContentSize as { width: number; height: number };
-    const finalWidth = Math.ceil(contentSize2.width);
-    const finalHeight = Math.min(Math.ceil(contentSize2.height), maxHeight);
-
-    // Capture with clip rect
-    const screenshot = await debuggerSend(target, "Page.captureScreenshot", {
-      format: "png",
-      captureBeyondViewport: true,
-      clip: {
-        x: 0,
-        y: 0,
-        width: finalWidth,
-        height: finalHeight,
-        scale: 1,
-      },
-    });
-
-    // Save the PNG
     const slug = generateSlug(url);
-    const filename = `pagegrab/screenshots/${slug}.png`;
-    const dataUrl = `data:image/png;base64,${screenshot.data as string}`;
+    const area = plan.mode === "visible-viewport"
+      ? getVisibleViewportArea(plan)
+      : await getFullPageArea(target);
 
-    await new Promise<void>((resolve, reject) => {
-      chrome.downloads.download(
-        {
-          url: dataUrl,
-          filename,
-          saveAs: false,
-          conflictAction: "uniquify",
-        },
-        (downloadId) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (downloadId === undefined) {
-            reject(new Error("Screenshot download failed"));
-          } else {
-            resolve();
-          }
-        }
-      );
+    const blobs = await captureAreaAsPngParts(target, area);
+    const filenames = blobs.map((_, index) => {
+      if (blobs.length === 1) return `pagegrab/screenshots/${slug}.png`;
+      return `pagegrab/screenshots/${slug}-part-${String(index + 1).padStart(2, "0")}.png`;
     });
 
-    return filename;
+    await Promise.all(blobs.map((blob, index) => downloadPngBlob(blob, filenames[index]!)));
+
+    if (filenames.length === 1) return filenames[0]!;
+    return `${filenames[0]} ... ${filenames[filenames.length - 1]} (${filenames.length} parts)`;
   } finally {
     // Restore original styles — must run even if screenshot or download failed
     await debuggerSend(target, "Runtime.evaluate", {
-      expression: `(() => {
-        if (window.__pagegrab_unwrapped) {
-          for (const item of window.__pagegrab_unwrapped) {
-            item.el.style.overflow = item.overflow;
-            item.el.style.overflowX = item.overflowX;
-            item.el.style.overflowY = item.overflowY;
-            item.el.style.height = item.height;
-            item.el.style.maxHeight = item.maxHeight;
-            item.el.style.minHeight = item.minHeight;
-          }
-          delete window.__pagegrab_unwrapped;
-        }
-        if (window.__pagegrab_html_orig) {
-          document.documentElement.style.overflow = window.__pagegrab_html_orig.overflow;
-          document.documentElement.style.height = window.__pagegrab_html_orig.height;
-          delete window.__pagegrab_html_orig;
-        }
-        if (window.__pagegrab_body_orig) {
-          document.body.style.overflow = window.__pagegrab_body_orig.overflow;
-          document.body.style.height = window.__pagegrab_body_orig.height;
-          delete window.__pagegrab_body_orig;
-        }
-        if (window.__pagegrab_fixed) {
-          window.__pagegrab_fixed.forEach(({ el, orig }) => {
-            el.style.position = orig;
-          });
-          delete window.__pagegrab_fixed;
-        }
-      })()`,
+      expression: RESTORE_SCREENSHOT_IIFE,
     }).catch(() => {
       // Ignore restore errors — debugger may already be detached
     });
