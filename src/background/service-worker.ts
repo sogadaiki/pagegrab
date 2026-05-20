@@ -962,6 +962,7 @@ const MIN_SCROLL_DELTA = 100;
 
 interface ScreenshotPlan {
   reason: string;
+  area: ScreenshotArea;
 }
 
 interface ScreenshotArea {
@@ -979,21 +980,46 @@ interface RuntimeEvaluateResult<T> {
 
 const PREPARE_SCREENSHOT_IIFE = `(() => {
   const viewportWidth = Math.max(1, Math.ceil(window.innerWidth));
+  const viewportHeight = Math.max(1, Math.ceil(window.innerHeight));
+  const root = document.scrollingElement || document.documentElement;
+  const body = document.body;
+  const html = document.documentElement;
+  const rootStyle = getComputedStyle(root);
+  const bodyStyle = body ? getComputedStyle(body) : null;
+  const documentDelta = Math.max(
+    root.scrollHeight - root.clientHeight,
+    html.scrollHeight - viewportHeight,
+    body ? body.scrollHeight - viewportHeight : 0
+  );
+  const documentOverflowY = rootStyle.overflowY + ' ' + (bodyStyle ? bodyStyle.overflowY : '');
+  const documentCanScroll = documentDelta > ${MIN_SCROLL_DELTA} && !/(hidden|clip)/.test(documentOverflowY);
 
-  // PageGrab's screenshot command promises full-page capture. Keep multi-pane
-  // layouts on the full-page path by unwrapping the primary scroll container and
-  // letting Page.getLayoutMetrics determine the final area.
   let bestEl = null;
   let bestDelta = ${MIN_SCROLL_DELTA};
   document.querySelectorAll('*').forEach((el) => {
     if (!(el instanceof HTMLElement)) return;
     if (el === document.documentElement || el === document.body) return;
+    const style = getComputedStyle(el);
+    const overflowText = style.overflow + ' ' + style.overflowY;
     const delta = el.scrollHeight - el.clientHeight;
-    if (delta > bestDelta && el.clientWidth >= viewportWidth * 0.5) {
+    const scrollable = /(auto|scroll|overlay)/.test(overflowText);
+    if (scrollable && delta > bestDelta && el.clientWidth >= viewportWidth * 0.5) {
       bestDelta = delta;
       bestEl = el;
     }
   });
+
+  if (!documentCanScroll && !bestEl) {
+    return {
+      reason: 'viewport-app',
+      area: {
+        x: Math.max(0, Math.floor(window.scrollX)),
+        y: Math.max(0, Math.floor(window.scrollY)),
+        width: viewportWidth,
+        height: viewportHeight,
+      },
+    };
+  }
 
   const unwrapped = [];
   if (bestEl) {
@@ -1044,8 +1070,25 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   window.__pagegrab_html_orig = htmlOrig;
   window.__pagegrab_body_orig = bodyOrig;
 
+  const captureHeight = Math.max(
+    viewportHeight,
+    Math.ceil(root.scrollHeight),
+    Math.ceil(html.scrollHeight),
+    body ? Math.ceil(body.scrollHeight) : 0,
+    Math.ceil(root.getBoundingClientRect().height),
+    Math.ceil(html.getBoundingClientRect().height),
+    body ? Math.ceil(body.getBoundingClientRect().height) : 0,
+    bestEl ? Math.ceil(bestEl.scrollHeight) : 0
+  );
+
   return {
-    reason: bestEl ? 'single-scroll-container-unwrapped' : 'document-flow',
+    reason: bestEl ? 'scroll-container-unwrapped' : 'document-flow',
+    area: {
+      x: 0,
+      y: 0,
+      width: viewportWidth,
+      height: captureHeight,
+    },
   };
 })()`;
 
@@ -1117,20 +1160,6 @@ async function stabilizeScreenshotPage(target: chrome.debugger.Debuggee): Promis
     awaitPromise: true,
     timeout: 5000,
   });
-}
-
-async function getFullPageArea(target: chrome.debugger.Debuggee): Promise<ScreenshotArea> {
-  const metrics = await debuggerSend(target, "Page.getLayoutMetrics");
-  const contentSize = metrics.cssContentSize as { width: number; height: number } | undefined;
-  if (!contentSize) {
-    throw new Error("Page.getLayoutMetrics did not return cssContentSize");
-  }
-  return {
-    x: 0,
-    y: 0,
-    width: Math.max(1, Math.ceil(contentSize.width)),
-    height: Math.max(1, Math.ceil(contentSize.height)),
-  };
 }
 
 async function capturePngBase64(
@@ -1279,11 +1308,11 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
   });
 
   try {
-    await prepareScreenshotPage(target);
+    const plan = await prepareScreenshotPage(target);
     await stabilizeScreenshotPage(target);
 
     const slug = generateSlug(url);
-    const area = await getFullPageArea(target);
+    const area = plan.area;
 
     const blobs = await captureAreaAsPngParts(target, area);
     const filenames = blobs.map((_, index) => {
