@@ -1003,7 +1003,12 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
     const overflowText = style.overflow + ' ' + style.overflowY;
     const delta = el.scrollHeight - el.clientHeight;
     const scrollable = /(auto|scroll|overlay)/.test(overflowText);
-    if (scrollable && delta > bestDelta && el.clientWidth >= viewportWidth * 0.5) {
+    if (
+      scrollable &&
+      delta > bestDelta &&
+      el.clientWidth >= viewportWidth * 0.2 &&
+      el.clientHeight >= viewportHeight * 0.3
+    ) {
       bestDelta = delta;
       bestEl = el;
     }
@@ -1025,6 +1030,7 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   if (bestEl) {
     let current = bestEl;
     while (current && current !== document.documentElement) {
+      const isPrimaryScrollContainer = current === bestEl;
       unwrapped.push({
         el: current,
         overflow: current.style.overflow,
@@ -1033,12 +1039,18 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
         height: current.style.height,
         maxHeight: current.style.maxHeight,
         minHeight: current.style.minHeight,
+        scrollTop: current.scrollTop,
+        scrollLeft: current.scrollLeft,
       });
       current.style.setProperty('overflow', 'visible', 'important');
       current.style.setProperty('overflow-x', 'visible', 'important');
       current.style.setProperty('overflow-y', 'visible', 'important');
-      current.style.setProperty('height', 'auto', 'important');
       current.style.setProperty('max-height', 'none', 'important');
+      if (isPrimaryScrollContainer) {
+        current.scrollTop = 0;
+        current.scrollLeft = 0;
+        current.style.setProperty('height', 'auto', 'important');
+      }
       current = current.parentElement;
     }
   }
@@ -1046,10 +1058,12 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   const htmlOrig = {
     overflow: document.documentElement.style.overflow,
     height: document.documentElement.style.height,
+    minHeight: document.documentElement.style.minHeight,
   };
   const bodyOrig = {
     overflow: document.body.style.overflow,
     height: document.body.style.height,
+    minHeight: document.body.style.minHeight,
   };
   document.documentElement.style.setProperty('overflow', 'visible', 'important');
   document.documentElement.style.setProperty('height', 'auto', 'important');
@@ -1081,13 +1095,23 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
     bestEl ? Math.ceil(bestEl.scrollHeight) : 0
   );
 
+  document.documentElement.style.setProperty('min-height', captureHeight + 'px', 'important');
+  document.body.style.setProperty('min-height', captureHeight + 'px', 'important');
+
+  const finalHeight = Math.max(
+    captureHeight,
+    Math.ceil(root.scrollHeight),
+    Math.ceil(html.scrollHeight),
+    body ? Math.ceil(body.scrollHeight) : 0
+  );
+
   return {
     reason: bestEl ? 'scroll-container-unwrapped' : 'document-flow',
     area: {
       x: 0,
       y: 0,
       width: viewportWidth,
-      height: captureHeight,
+      height: finalHeight,
     },
   };
 })()`;
@@ -1101,17 +1125,21 @@ const RESTORE_SCREENSHOT_IIFE = `(() => {
       item.el.style.height = item.height;
       item.el.style.maxHeight = item.maxHeight;
       item.el.style.minHeight = item.minHeight;
+      item.el.scrollTop = item.scrollTop;
+      item.el.scrollLeft = item.scrollLeft;
     }
     delete window.__pagegrab_unwrapped;
   }
   if (window.__pagegrab_html_orig) {
     document.documentElement.style.overflow = window.__pagegrab_html_orig.overflow;
     document.documentElement.style.height = window.__pagegrab_html_orig.height;
+    document.documentElement.style.minHeight = window.__pagegrab_html_orig.minHeight;
     delete window.__pagegrab_html_orig;
   }
   if (window.__pagegrab_body_orig) {
     document.body.style.overflow = window.__pagegrab_body_orig.overflow;
     document.body.style.height = window.__pagegrab_body_orig.height;
+    document.body.style.minHeight = window.__pagegrab_body_orig.minHeight;
     delete window.__pagegrab_body_orig;
   }
   if (window.__pagegrab_fixed) {
