@@ -960,9 +960,18 @@ const MAX_CAPTURE_DEVICE_HEIGHT = 8192;
 const MAX_STITCH_DEVICE_HEIGHT = 30000;
 const MIN_SCROLL_DELTA = 100;
 
+type ScreenshotMode = "document-flow" | "scroll-container" | "viewport";
+
 interface ScreenshotPlan {
+  mode: ScreenshotMode;
   reason: string;
-  area: ScreenshotArea;
+  outputWidth: number;
+  outputHeight: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  area?: ScreenshotArea;
+  bandTop?: number;
+  bandHeight?: number;
 }
 
 interface ScreenshotArea {
@@ -994,29 +1003,87 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   const documentOverflowY = rootStyle.overflowY + ' ' + (bodyStyle ? bodyStyle.overflowY : '');
   const documentCanScroll = documentDelta > ${MIN_SCROLL_DELTA} && !/(hidden|clip)/.test(documentOverflowY);
 
-  let bestEl = null;
-  let bestDelta = ${MIN_SCROLL_DELTA};
+  const candidates = [];
   document.querySelectorAll('*').forEach((el) => {
     if (!(el instanceof HTMLElement)) return;
     if (el === document.documentElement || el === document.body) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) return;
     const style = getComputedStyle(el);
     const overflowText = style.overflow + ' ' + style.overflowY;
     const delta = el.scrollHeight - el.clientHeight;
     const scrollable = /(auto|scroll|overlay)/.test(overflowText);
     if (
       scrollable &&
-      delta > bestDelta &&
+      delta > ${MIN_SCROLL_DELTA} &&
       el.clientWidth >= viewportWidth * 0.2 &&
       el.clientHeight >= viewportHeight * 0.3
     ) {
-      bestDelta = delta;
-      bestEl = el;
+      candidates.push({
+        el,
+        delta,
+        rect: {
+          left: Math.max(0, Math.floor(rect.left)),
+          top: Math.max(0, Math.floor(rect.top)),
+          width: Math.min(viewportWidth - Math.max(0, Math.floor(rect.left)), Math.ceil(rect.width)),
+          height: Math.min(viewportHeight - Math.max(0, Math.floor(rect.top)), Math.ceil(rect.height)),
+        },
+        scrollHeight: Math.ceil(el.scrollHeight),
+        scrollTop: el.scrollTop,
+        scrollLeft: el.scrollLeft,
+      });
     }
   });
 
-  if (!documentCanScroll && !bestEl) {
+  const scrollContainers = candidates.filter((candidate) => {
+    return !candidates.some((other) => {
+      if (other === candidate) return false;
+      if (!other.el.contains(candidate.el)) return false;
+      return other.rect.width >= candidate.rect.width * 0.75 &&
+        other.rect.height >= candidate.rect.height * 0.75;
+    });
+  }).sort((a, b) => b.delta - a.delta);
+
+  if (scrollContainers.length > 0) {
+    const primary = scrollContainers[0];
+    const bandTop = primary.rect.top;
+    const bandHeight = Math.max(1, viewportHeight - bandTop);
+    const outputHeight = Math.max(
+      viewportHeight,
+      ...scrollContainers.map((container) => container.rect.top + container.scrollHeight)
+    );
+
+    window.__pagegrab_scroll_containers = scrollContainers.map((container) => {
+      container.el.scrollTop = 0;
+      container.el.scrollLeft = 0;
+      return {
+        el: container.el,
+        scrollTop: container.scrollTop,
+        scrollLeft: container.scrollLeft,
+      };
+    });
+
     return {
+      mode: 'scroll-container',
+      reason: 'scroll-container-band-stitch',
+      outputWidth: viewportWidth,
+      outputHeight,
+      viewportWidth,
+      viewportHeight,
+      bandTop,
+      bandHeight,
+    };
+  }
+
+  if (!documentCanScroll) {
+    return {
+      mode: 'viewport',
       reason: 'viewport-app',
+      outputWidth: viewportWidth,
+      outputHeight: viewportHeight,
+      viewportWidth,
+      viewportHeight,
       area: {
         x: Math.max(0, Math.floor(window.scrollX)),
         y: Math.max(0, Math.floor(window.scrollY)),
@@ -1027,33 +1094,6 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   }
 
   const unwrapped = [];
-  if (bestEl) {
-    let current = bestEl;
-    while (current && current !== document.documentElement) {
-      const isPrimaryScrollContainer = current === bestEl;
-      unwrapped.push({
-        el: current,
-        overflow: current.style.overflow,
-        overflowX: current.style.overflowX,
-        overflowY: current.style.overflowY,
-        height: current.style.height,
-        maxHeight: current.style.maxHeight,
-        minHeight: current.style.minHeight,
-        scrollTop: current.scrollTop,
-        scrollLeft: current.scrollLeft,
-      });
-      current.style.setProperty('overflow', 'visible', 'important');
-      current.style.setProperty('overflow-x', 'visible', 'important');
-      current.style.setProperty('overflow-y', 'visible', 'important');
-      current.style.setProperty('max-height', 'none', 'important');
-      if (isPrimaryScrollContainer) {
-        current.scrollTop = 0;
-        current.scrollLeft = 0;
-        current.style.setProperty('height', 'auto', 'important');
-      }
-      current = current.parentElement;
-    }
-  }
 
   const htmlOrig = {
     overflow: document.documentElement.style.overflow,
@@ -1091,8 +1131,7 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
     body ? Math.ceil(body.scrollHeight) : 0,
     Math.ceil(root.getBoundingClientRect().height),
     Math.ceil(html.getBoundingClientRect().height),
-    body ? Math.ceil(body.getBoundingClientRect().height) : 0,
-    bestEl ? Math.ceil(bestEl.scrollHeight) : 0
+    body ? Math.ceil(body.getBoundingClientRect().height) : 0
   );
 
   document.documentElement.style.setProperty('min-height', captureHeight + 'px', 'important');
@@ -1106,7 +1145,12 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   );
 
   return {
-    reason: bestEl ? 'scroll-container-unwrapped' : 'document-flow',
+    mode: 'document-flow',
+    reason: 'document-flow',
+    outputWidth: viewportWidth,
+    outputHeight: finalHeight,
+    viewportWidth,
+    viewportHeight,
     area: {
       x: 0,
       y: 0,
@@ -1117,6 +1161,13 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
 })()`;
 
 const RESTORE_SCREENSHOT_IIFE = `(() => {
+  if (window.__pagegrab_scroll_containers) {
+    for (const item of window.__pagegrab_scroll_containers) {
+      item.el.scrollTop = item.scrollTop;
+      item.el.scrollLeft = item.scrollLeft;
+    }
+    delete window.__pagegrab_scroll_containers;
+  }
   if (window.__pagegrab_unwrapped) {
     for (const item of window.__pagegrab_unwrapped) {
       item.el.style.overflow = item.overflow;
@@ -1125,8 +1176,6 @@ const RESTORE_SCREENSHOT_IIFE = `(() => {
       item.el.style.height = item.height;
       item.el.style.maxHeight = item.maxHeight;
       item.el.style.minHeight = item.minHeight;
-      item.el.scrollTop = item.scrollTop;
-      item.el.scrollLeft = item.scrollLeft;
     }
     delete window.__pagegrab_unwrapped;
   }
@@ -1297,6 +1346,165 @@ async function captureAreaAsPngParts(
   return parts;
 }
 
+function drawCssRect(
+  context: OffscreenCanvasRenderingContext2D,
+  bitmap: ImageBitmap,
+  source: ScreenshotArea,
+  destination: ScreenshotArea
+): void {
+  const scale = SCREENSHOT_SCALE;
+  context.drawImage(
+    bitmap,
+    source.x * scale,
+    source.y * scale,
+    source.width * scale,
+    source.height * scale,
+    destination.x * scale,
+    destination.y * scale,
+    destination.width * scale,
+    destination.height * scale
+  );
+}
+
+async function setScrollContainerOffset(
+  target: chrome.debugger.Debuggee,
+  offset: number
+): Promise<void> {
+  await debuggerSend(target, "Runtime.evaluate", {
+    expression: `(() => {
+      const containers = window.__pagegrab_scroll_containers || [];
+      for (const item of containers) {
+        const maxScrollTop = Math.max(0, item.el.scrollHeight - item.el.clientHeight);
+        item.el.scrollTop = Math.min(${Math.max(0, Math.floor(offset))}, maxScrollTop);
+        item.el.scrollLeft = 0;
+      }
+    })()`,
+    awaitPromise: false,
+    timeout: 5000,
+  });
+}
+
+async function captureScrollContainerPartAsPngBlob(
+  target: chrome.debugger.Debuggee,
+  plan: ScreenshotPlan,
+  partY: number,
+  partHeight: number
+): Promise<Blob> {
+  if (plan.bandTop === undefined || plan.bandHeight === undefined) {
+    throw new Error("Scroll-container screenshot plan is missing band geometry");
+  }
+
+  const deviceWidth = Math.ceil(plan.outputWidth * SCREENSHOT_SCALE);
+  const deviceHeight = Math.ceil(partHeight * SCREENSHOT_SCALE);
+  const canvas = new OffscreenCanvas(deviceWidth, deviceHeight);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Failed to create screenshot stitch canvas");
+  }
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, deviceWidth, deviceHeight);
+
+  await setScrollContainerOffset(target, 0);
+  await stabilizeScreenshotPage(target);
+  const baseBitmap = await base64PngToImageBitmap(await capturePngBase64(target, {
+    x: 0,
+    y: 0,
+    width: plan.viewportWidth,
+    height: plan.viewportHeight,
+  }));
+  try {
+    const baseStart = Math.max(partY, 0);
+    const baseEnd = Math.min(partY + partHeight, plan.viewportHeight);
+    if (baseEnd > baseStart) {
+      drawCssRect(
+        context,
+        baseBitmap,
+        { x: 0, y: baseStart, width: plan.outputWidth, height: baseEnd - baseStart },
+        { x: 0, y: baseStart - partY, width: plan.outputWidth, height: baseEnd - baseStart }
+      );
+    }
+  } finally {
+    baseBitmap.close();
+  }
+
+  const scrollableHeight = Math.max(0, plan.outputHeight - plan.bandTop);
+  const offsets: number[] = [];
+  for (let offset = 0; offset < scrollableHeight; offset += plan.bandHeight) {
+    offsets.push(offset);
+  }
+  const finalOffset = Math.max(0, scrollableHeight - plan.bandHeight);
+  if (!offsets.includes(finalOffset)) {
+    offsets.push(finalOffset);
+  }
+
+  for (const offset of offsets) {
+    const stripeHeight = Math.min(
+      plan.bandHeight,
+      plan.outputHeight - (plan.bandTop + offset)
+    );
+    const stripeTop = plan.bandTop + offset;
+    const stripeBottom = stripeTop + stripeHeight;
+    const overlapTop = Math.max(partY, stripeTop);
+    const overlapBottom = Math.min(partY + partHeight, stripeBottom);
+
+    if (overlapBottom > overlapTop) {
+      await setScrollContainerOffset(target, offset);
+      await stabilizeScreenshotPage(target);
+      const stripeBitmap = await base64PngToImageBitmap(await capturePngBase64(target, {
+        x: 0,
+        y: 0,
+        width: plan.viewportWidth,
+        height: plan.viewportHeight,
+      }));
+      try {
+        drawCssRect(
+          context,
+          stripeBitmap,
+          {
+            x: 0,
+            y: plan.bandTop + (overlapTop - stripeTop),
+            width: plan.outputWidth,
+            height: overlapBottom - overlapTop,
+          },
+          {
+            x: 0,
+            y: overlapTop - partY,
+            width: plan.outputWidth,
+            height: overlapBottom - overlapTop,
+          }
+        );
+      } finally {
+        stripeBitmap.close();
+      }
+    }
+
+  }
+
+  return canvas.convertToBlob({ type: "image/png" });
+}
+
+async function captureScrollContainerAsPngParts(
+  target: chrome.debugger.Debuggee,
+  plan: ScreenshotPlan
+): Promise<Blob[]> {
+  const maxPartCssHeight = getMaxPartCssHeight();
+  const parts: Blob[] = [];
+  let capturedCssHeight = 0;
+
+  while (capturedCssHeight < plan.outputHeight) {
+    const partCssHeight = Math.min(maxPartCssHeight, plan.outputHeight - capturedCssHeight);
+    parts.push(await captureScrollContainerPartAsPngBlob(
+      target,
+      plan,
+      capturedCssHeight,
+      partCssHeight
+    ));
+    capturedCssHeight += partCssHeight;
+  }
+
+  return parts;
+}
+
 async function downloadPngBlob(blob: Blob, filename: string): Promise<void> {
   const dataUrl = await blobToDataUrl(blob);
 
@@ -1340,9 +1548,14 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
     await stabilizeScreenshotPage(target);
 
     const slug = generateSlug(url);
-    const area = plan.area;
-
-    const blobs = await captureAreaAsPngParts(target, area);
+    const blobs = plan.mode === "scroll-container"
+      ? await captureScrollContainerAsPngParts(target, plan)
+      : await captureAreaAsPngParts(target, plan.area ?? {
+        x: 0,
+        y: 0,
+        width: plan.outputWidth,
+        height: plan.outputHeight,
+      });
     const filenames = blobs.map((_, index) => {
       if (blobs.length === 1) return `pagegrab/screenshots/${slug}.png`;
       return `pagegrab/screenshots/${slug}-part-${String(index + 1).padStart(2, "0")}.png`;
