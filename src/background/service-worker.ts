@@ -960,15 +960,8 @@ const MAX_CAPTURE_DEVICE_HEIGHT = 8192;
 const MAX_STITCH_DEVICE_HEIGHT = 30000;
 const MIN_SCROLL_DELTA = 100;
 
-type ScreenshotMode = "full-page" | "visible-viewport";
-
 interface ScreenshotPlan {
-  mode: ScreenshotMode;
   reason: string;
-  viewportWidth: number;
-  viewportHeight: number;
-  scrollX: number;
-  scrollY: number;
 }
 
 interface ScreenshotArea {
@@ -986,83 +979,10 @@ interface RuntimeEvaluateResult<T> {
 
 const PREPARE_SCREENSHOT_IIFE = `(() => {
   const viewportWidth = Math.max(1, Math.ceil(window.innerWidth));
-  const viewportHeight = Math.max(1, Math.ceil(window.innerHeight));
 
-  const isVisibleRect = (rect) => (
-    rect.width > 0 &&
-    rect.height > 0 &&
-    rect.bottom > 0 &&
-    rect.top < viewportHeight &&
-    rect.right > 0 &&
-    rect.left < viewportWidth
-  );
-
-  const candidates = [];
-  document.querySelectorAll('*').forEach((el) => {
-    if (!(el instanceof HTMLElement)) return;
-    if (el === document.documentElement || el === document.body) return;
-
-    const rect = el.getBoundingClientRect();
-    if (!isVisibleRect(rect)) return;
-    if (rect.width < viewportWidth * 0.12) return;
-    if (rect.height < viewportHeight * 0.45) return;
-
-    const style = getComputedStyle(el);
-    const overflowText = style.overflow + ' ' + style.overflowY;
-    const delta = el.scrollHeight - el.clientHeight;
-    const scrollable = /(auto|scroll|overlay)/.test(overflowText) && delta > ${MIN_SCROLL_DELTA};
-    const clippedPane = /(auto|scroll|overlay|hidden|clip)/.test(overflowText) && rect.height >= viewportHeight * 0.55;
-
-    if (!scrollable && !clippedPane) return;
-
-    candidates.push({
-      el,
-      rect: {
-        left: rect.left,
-        right: rect.right,
-        width: rect.width,
-        height: rect.height,
-      },
-      delta,
-      scrollable,
-    });
-  });
-
-  const outerCandidates = candidates.filter((candidate) => {
-    return !candidates.some((other) => {
-      if (other === candidate) return false;
-      if (!other.el.contains(candidate.el)) return false;
-      return other.rect.width >= candidate.rect.width * 0.9 &&
-        other.rect.width <= candidate.rect.width * 1.15 &&
-        other.rect.height >= candidate.rect.height * 0.9 &&
-        other.rect.height <= candidate.rect.height * 1.15;
-    });
-  });
-
-  const columns = [];
-  for (const candidate of outerCandidates.sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height)) {
-    const overlapsColumn = columns.some((column) => {
-      const left = Math.max(candidate.rect.left, column.rect.left);
-      const right = Math.min(candidate.rect.right, column.rect.right);
-      const overlap = Math.max(0, right - left);
-      return overlap / Math.min(candidate.rect.width, column.rect.width) > 0.45;
-    });
-    if (!overlapsColumn) columns.push(candidate);
-  }
-
-  const hasScrollableColumn = columns.some((column) => column.scrollable);
-  if (columns.length >= 2 && hasScrollableColumn) {
-    return {
-      mode: 'visible-viewport',
-      reason: 'multi-column-scroll-layout',
-      viewportWidth,
-      viewportHeight,
-      scrollX: Math.max(0, window.scrollX),
-      scrollY: Math.max(0, window.scrollY),
-    };
-  }
-
-  // Single-flow pages are safe to unwrap for a full-page capture.
+  // PageGrab's screenshot command promises full-page capture. Keep multi-pane
+  // layouts on the full-page path by unwrapping the primary scroll container and
+  // letting Page.getLayoutMetrics determine the final area.
   let bestEl = null;
   let bestDelta = ${MIN_SCROLL_DELTA};
   document.querySelectorAll('*').forEach((el) => {
@@ -1125,12 +1045,7 @@ const PREPARE_SCREENSHOT_IIFE = `(() => {
   window.__pagegrab_body_orig = bodyOrig;
 
   return {
-    mode: 'full-page',
     reason: bestEl ? 'single-scroll-container-unwrapped' : 'document-flow',
-    viewportWidth,
-    viewportHeight,
-    scrollX: Math.max(0, window.scrollX),
-    scrollY: Math.max(0, window.scrollY),
   };
 })()`;
 
@@ -1215,15 +1130,6 @@ async function getFullPageArea(target: chrome.debugger.Debuggee): Promise<Screen
     y: 0,
     width: Math.max(1, Math.ceil(contentSize.width)),
     height: Math.max(1, Math.ceil(contentSize.height)),
-  };
-}
-
-function getVisibleViewportArea(plan: ScreenshotPlan): ScreenshotArea {
-  return {
-    x: Math.max(0, Math.floor(plan.scrollX)),
-    y: Math.max(0, Math.floor(plan.scrollY)),
-    width: Math.max(1, Math.ceil(plan.viewportWidth)),
-    height: Math.max(1, Math.ceil(plan.viewportHeight)),
   };
 }
 
@@ -1373,13 +1279,11 @@ async function captureFullPage(tabId: number, url: string): Promise<string> {
   });
 
   try {
-    const plan = await prepareScreenshotPage(target);
+    await prepareScreenshotPage(target);
     await stabilizeScreenshotPage(target);
 
     const slug = generateSlug(url);
-    const area = plan.mode === "visible-viewport"
-      ? getVisibleViewportArea(plan)
-      : await getFullPageArea(target);
+    const area = await getFullPageArea(target);
 
     const blobs = await captureAreaAsPngParts(target, area);
     const filenames = blobs.map((_, index) => {
