@@ -37,6 +37,7 @@ Chrome 拡張本体は `src/background`, `src/content`, `src/popup` が正本で
 - **X(Twitter)最適化** - ツイート、スレッド、Notes(長文ポスト)、Articlesに対応
 - **画像ダウンロード** - 記事内の全画像をローカル保存。Markdownに絶対パスで参照
 - **Markdown出力** - frontmatterメタデータ + 構造化コンテンツ。AIツールにそのまま渡せる形式
+- **可視範囲スクリーンショット** - Chromeで今見えているタブ内のWebページ領域をPNG保存
 - **外部依存ゼロ** - ブラウザ内で完結。APIキー不要、外部サーバーへの通信なし
 
 ## Size / サイズ
@@ -54,7 +55,7 @@ Chrome 拡張本体は `src/background`, `src/content`, `src/popup` が正本で
 - **外部通信なし** - 抽出したデータはローカルにのみ保存されます。外部サーバーへの送信は一切ありません
 - **コード量が少ない** - TypeScript約1,000行のみ。全コードを自分で確認できます
 - **難読化なし** - ビルド済みJSもminifyしていません。`dist/` 内のコードをそのまま読めます
-- **必要最小限の権限** - `activeTab`(現在のタブのみ), `scripting`, `downloads`, `debugger`
+- **必要最小限の権限** - `activeTab`(現在のタブのみ), `scripting`, `downloads`
 
 **自己責任でのインストールをお願いします。** Chrome Web Storeの審査を経ていない開発者モードインストールです。コードはすべてこのリポジトリで公開されているので、不安な方はインストール前にソースコードをご確認ください。
 

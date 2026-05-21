@@ -85,7 +85,7 @@ pickComponentBtn.addEventListener("click", () => {
 
 screenshotBtn.addEventListener("click", async () => {
   setButtonsDisabled(true);
-  setStatus("Capturing high-res screenshot...", "info");
+  setStatus("Capturing visible screenshot...", "info");
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url) {

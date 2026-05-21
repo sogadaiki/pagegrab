@@ -189,7 +189,7 @@
       <ul>
         <li>Page text and HTML structure (for content extraction and layout analysis)</li>
         <li>CSS styles and computed layout values (for design system reverse-engineering)</li>
-        <li>Visual rendering of the page (for full-page screenshots)</li>
+        <li>Visual rendering of the active tab (for visible viewport screenshots)</li>
       </ul>
       <p>
         This data is processed in memory and, if you choose to export it, saved directly to your
@@ -205,7 +205,7 @@
         <li>Extract and format text content from the current page</li>
         <li>Analyze page layout and component structure</li>
         <li>Identify design tokens (colors, typography, spacing)</li>
-        <li>Capture full-page screenshots via Chrome DevTools Protocol</li>
+        <li>Capture visible viewport screenshots from the active tab</li>
       </ul>
       <p>
         No data is retained between sessions. When you close the extension popup or navigate away,
@@ -256,14 +256,6 @@
             <td>
               Used to save extracted text, JSON output, or screenshot image files directly to
               your local filesystem. No file data passes through any server.
-            </td>
-          </tr>
-          <tr>
-            <td><code>debugger</code></td>
-            <td>
-              Required to attach to the Chrome DevTools Protocol, which enables full-page
-              screenshots that capture content beyond the visible viewport. This attachment
-              is active only during screenshot capture and is released immediately after.
             </td>
           </tr>
         </tbody>
