@@ -71,7 +71,10 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.action === "screenshot") {
-      captureVisibleViewport(message.tabId, message.url)
+      const capture = message.mode === "full-page"
+        ? captureFullPage
+        : captureVisibleViewport;
+      capture(message.tabId, message.url)
         .then((filename) => {
           chrome.runtime.sendMessage({
             action: "status",
@@ -1020,6 +1023,181 @@ async function captureVisibleViewport(tabId: number, url: string): Promise<strin
   const filename = `pagegrab/screenshots/${slug}.png`;
   await downloadScreenshotDataUrl(dataUrl, filename);
   return filename;
+}
+
+// ── Full-page screenshot ─────────────────────────────────────
+
+const MAX_FULL_PAGE_SCALE = 2;
+const MAX_FULL_PAGE_PIXELS = 80_000_000;
+
+interface DebuggerRuntimeResult<T> {
+  result?: {
+    value?: T;
+  };
+}
+
+interface LayoutSize {
+  width?: number;
+  height?: number;
+}
+
+interface LayoutViewport {
+  clientWidth?: number;
+  clientHeight?: number;
+}
+
+interface LayoutMetricsResult {
+  contentSize?: LayoutSize;
+  cssContentSize?: LayoutSize;
+  layoutViewport?: LayoutViewport;
+  visualViewport?: LayoutViewport;
+}
+
+interface CaptureScreenshotResult {
+  data?: string;
+}
+
+function attachDebugger(target: chrome.debugger.Debuggee): Promise<void> {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach(target, "1.3", () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function detachDebugger(target: chrome.debugger.Debuggee): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.debugger.detach(target, () => {
+      resolve();
+    });
+  });
+}
+
+function debuggerSend<T>(
+  target: chrome.debugger.Debuggee,
+  method: string,
+  params?: Record<string, unknown>
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve((result ?? {}) as T);
+    });
+  });
+}
+
+async function waitForFullPageCaptureReady(target: chrome.debugger.Debuggee): Promise<void> {
+  await debuggerSend<unknown>(target, "Runtime.evaluate", {
+    expression: `(() => new Promise((resolve) => {
+      const waitForFonts = document.fonts ? document.fonts.ready.catch(() => undefined) : Promise.resolve();
+      waitForFonts.then(() => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+    }))()`,
+    awaitPromise: true,
+    timeout: 5000,
+  });
+}
+
+async function getDevicePixelRatio(target: chrome.debugger.Debuggee): Promise<number> {
+  const result = await debuggerSend<DebuggerRuntimeResult<number>>(target, "Runtime.evaluate", {
+    expression: "window.devicePixelRatio || 1",
+    returnByValue: true,
+    awaitPromise: false,
+    timeout: 2000,
+  });
+  const value = result.result?.value;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function chooseFullPageScale(width: number, height: number, devicePixelRatio: number): number {
+  const baseScale = Math.min(MAX_FULL_PAGE_SCALE, Math.max(1, devicePixelRatio));
+  const cssPixels = Math.max(1, width * height);
+  const maxScaleByPixels = Math.sqrt(MAX_FULL_PAGE_PIXELS / cssPixels);
+  return Math.max(1, Math.min(baseScale, maxScaleByPixels));
+}
+
+function getFullPageDimensions(metrics: LayoutMetricsResult): { width: number; height: number } {
+  const content = metrics.cssContentSize ?? metrics.contentSize ?? {};
+  const width = Math.ceil(Math.max(
+    1,
+    content.width ?? 0,
+    metrics.layoutViewport?.clientWidth ?? 0,
+    metrics.visualViewport?.clientWidth ?? 0
+  ));
+  const height = Math.ceil(Math.max(
+    1,
+    content.height ?? 0,
+    metrics.layoutViewport?.clientHeight ?? 0,
+    metrics.visualViewport?.clientHeight ?? 0
+  ));
+  return { width, height };
+}
+
+async function captureFullPageDataUrl(
+  target: chrome.debugger.Debuggee,
+  width: number,
+  height: number,
+  scale: number
+): Promise<string> {
+  const candidateScales = scale > 1 ? [scale, 1] : [1];
+  let lastError: unknown;
+
+  for (const candidateScale of candidateScales) {
+    try {
+      const screenshot = await debuggerSend<CaptureScreenshotResult>(target, "Page.captureScreenshot", {
+        format: "png",
+        captureBeyondViewport: true,
+        fromSurface: true,
+        clip: {
+          x: 0,
+          y: 0,
+          width,
+          height,
+          scale: candidateScale,
+        },
+      });
+
+      if (!screenshot.data) {
+        throw new Error("Full-page screenshot did not return PNG data");
+      }
+      return `data:image/png;base64,${screenshot.data}`;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Full-page screenshot failed");
+}
+
+async function captureFullPage(tabId: number, url: string): Promise<string> {
+  const target: chrome.debugger.Debuggee = { tabId };
+  await attachDebugger(target);
+
+  try {
+    await debuggerSend<unknown>(target, "Page.enable");
+    await waitForFullPageCaptureReady(target);
+    const metrics = await debuggerSend<LayoutMetricsResult>(target, "Page.getLayoutMetrics");
+    const { width, height } = getFullPageDimensions(metrics);
+    const devicePixelRatio = await getDevicePixelRatio(target);
+    const scale = chooseFullPageScale(width, height, devicePixelRatio);
+    const dataUrl = await captureFullPageDataUrl(target, width, height, scale);
+    const slug = generateSlug(url);
+    const filename = `pagegrab/screenshots/${slug}-full.png`;
+    await downloadScreenshotDataUrl(dataUrl, filename);
+    return filename;
+  } finally {
+    await detachDebugger(target);
+  }
 }
 
 // ── Shared utilities ─────────────────────────────────────────

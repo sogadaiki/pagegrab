@@ -4,7 +4,8 @@ const extractBtn = document.getElementById("extract-btn") as HTMLButtonElement;
 const analyzeBtn = document.getElementById("analyze-btn") as HTMLButtonElement;
 const designSystemBtn = document.getElementById("design-system-btn") as HTMLButtonElement;
 const pickComponentBtn = document.getElementById("pick-component-btn") as HTMLButtonElement;
-const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement;
+const visibleScreenshotBtn = document.getElementById("visible-screenshot-btn") as HTMLButtonElement;
+const fullScreenshotBtn = document.getElementById("full-screenshot-btn") as HTMLButtonElement;
 const statusEl = document.getElementById("status") as HTMLDivElement;
 const versionLabel = document.getElementById("version-label") as HTMLSpanElement;
 
@@ -20,7 +21,8 @@ function setButtonsDisabled(disabled: boolean) {
   analyzeBtn.disabled = disabled;
   designSystemBtn.disabled = disabled;
   pickComponentBtn.disabled = disabled;
-  screenshotBtn.disabled = disabled;
+  visibleScreenshotBtn.disabled = disabled;
+  fullScreenshotBtn.disabled = disabled;
 }
 
 async function injectAndSendAction(action: "extract" | "analyze" | "design-system" | "pick-component", statusText: string) {
@@ -83,9 +85,9 @@ pickComponentBtn.addEventListener("click", () => {
   injectAndSendAction("pick-component", "Click an element to extract...");
 });
 
-screenshotBtn.addEventListener("click", async () => {
+async function captureScreenshot(mode: ScreenshotMessage["mode"], statusText: string) {
   setButtonsDisabled(true);
-  setStatus("Capturing visible screenshot...", "info");
+  setStatus(statusText, "info");
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url) {
@@ -95,7 +97,7 @@ screenshotBtn.addEventListener("click", async () => {
   }
 
   // Screenshot goes directly to service-worker (no content script needed)
-  const msg: ScreenshotMessage = { action: "screenshot", tabId: tab.id, url: tab.url };
+  const msg: ScreenshotMessage = { action: "screenshot", tabId: tab.id, url: tab.url, mode };
   chrome.runtime.sendMessage(msg, (response) => {
     if (chrome.runtime.lastError) {
       setStatus(`Error: ${chrome.runtime.lastError.message}`, "error");
@@ -110,6 +112,14 @@ screenshotBtn.addEventListener("click", async () => {
       setButtonsDisabled(false);
     }
   });
+}
+
+visibleScreenshotBtn.addEventListener("click", () => {
+  captureScreenshot("visible", "Capturing visible screenshot...");
+});
+
+fullScreenshotBtn.addEventListener("click", () => {
+  captureScreenshot("full-page", "Capturing full-page screenshot...");
 });
 
 // Listen for status updates from background

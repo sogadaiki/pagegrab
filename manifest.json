@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "PageGrab",
-  "version": "0.5.6",
-  "description": "Extract page text as Markdown and capture visible screenshots",
+  "version": "0.5.7",
+  "description": "Extract page text as Markdown and capture visible or full-page screenshots",
   "permissions": [
     "activeTab",
     "scripting",
-    "downloads"
+    "downloads",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

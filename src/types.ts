@@ -38,6 +38,7 @@ export interface ScreenshotMessage {
   action: "screenshot";
   tabId: number;
   url: string;
+  mode: "visible" | "full-page";
 }
 
 export interface PickComponentMessage {
